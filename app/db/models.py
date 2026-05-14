@@ -118,6 +118,31 @@ class User(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
     )
+    
+    # RELATIONSHIPS
+
+    addresses: Mapped[list[Address]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    restaurants: Mapped[list[Restaurant]] = relationship(
+        back_populates="owner",
+    )
+
+    orders: Mapped[list[Order]] = relationship(
+        back_populates="user",
+    )
+
+    cart: Mapped[Cart | None] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Address(Base):
@@ -193,6 +218,16 @@ class Address(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+    # RELATIONSHIP
+
+    user: Mapped[User] = relationship(
+        back_populates="addresses",
+    )
+
+    orders: Mapped[list[Order]] = relationship(
+        back_populates="address",
     )
 
 
@@ -306,10 +341,37 @@ class Restaurant(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
+    
+    #relationships
+    owner: Mapped[User] = relationship(
+        back_populates="restaurants",
+    )
+
+    categories: Mapped[list[Category]] = relationship(
+        back_populates="restaurant",
+        cascade="all, delete-orphan",
+    )
+
+    menu_items: Mapped[list[MenuItem]] = relationship(
+        back_populates="restaurant",
+        cascade="all, delete-orphan",
+    )
+
+    images: Mapped[list[RestaurantImage]] = relationship(
+        back_populates="restaurant",
+        cascade="all, delete-orphan",
+    )
+
+    orders: Mapped[list[Order]] = relationship(
+        back_populates="restaurant",
+    )
+
+
+
 
 class RestaurantImage(Base):
 
-    __tablename__ = "restaurantimages"
+    __tablename__ = "restaurant_images"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4, index=True
@@ -371,7 +433,6 @@ class Category(Base):
     )
 
     # RELATIONSHIPS
-
     restaurant: Mapped[Restaurant] = relationship(
         back_populates="categories",
     )
@@ -457,4 +518,296 @@ class MenuItem(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+    #RELATIONSHIP
+
+    restaurant: Mapped[Restaurant] = relationship(
+        back_populates="menu_items",
+    )
+
+    category: Mapped[Category] = relationship(
+        back_populates="menu_items",
+    )
+
+    cart_items: Mapped[list[CartItem]] = relationship(
+        back_populates="menu_item",
+    )
+
+    order_items: Mapped[list[OrderItem]] = relationship(
+        back_populates="menu_item",
+    )
+
+
+class Cart(Base):
+
+    __tablename__ = "carts"
+
+    # NOTE - one cart per user only
+    # cart will hold the items from a single restaurant only
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key = True,
+        default = lambda: uuid.uuid4,
+        index = True,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        unique= True,
+        index= True,
+    )
+
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("restaurants.id"),
+        nullable = False,
+    )
+
+    total_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10,2),
+        default = 0,
+        nullable = False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone= True ),
+        default = lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default = lambda: datetime.now(UTC),
+    )
+
+    #RELATIONSHIPS
+
+    user: Mapped[User] = relationship(
+        back_populates= "cart"
+    )
+
+    items: Mapped[list[CartItem]] = relationship(
+        back_populates= "cart",
+        cascade = "all,delete-orphan",
+    )
+
+
+class CartItem(Base):
+
+    __tablename__ = "cart_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key = True,
+        default = lambda: uuid.uuid4,
+        index = True,
+    )
+
+    cart_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("carts.id", ondelete= "CASCADE"),
+        nullable = False,
+        index = True,
+    )
+
+    menu_item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("menuitems.id"),
+        nullable= False,
+        index = True,
+    )
+
+    quantity: Mapped[int] = mapped_column(
+        Integer,
+        nullable = False,
+    )
+
+    item_price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+    )
+
+    total_price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone = True),
+        default = lambda: datetime.now(UTC),
+    )
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("restaurants.id"),
+        nullable=False,
+        index=True,
+    )
+
+    address_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("addresses.id"),
+        nullable=False,
+    )
+
+    status: Mapped[OrderStatus] = mapped_column(
+        Enum(OrderStatus),
+        default=OrderStatus.PLACED,
+    )
+
+    subtotal: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    delivery_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    tax_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+    payment_status: Mapped[PaymentStatus] = mapped_column(
+        Enum(PaymentStatus),
+        default=PaymentStatus.PENDING,
+    )
+
+    payment_method: Mapped[PaymentProvider] = mapped_column(
+        Enum(PaymentProvider),
+    )
+
+    special_instructions: Mapped[str | None] = mapped_column(Text)
+
+    placed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    # relationships
+    items: Mapped[list[OrderItem]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
+
+    payment: Mapped[Payment | None] = relationship(
+        back_populates="order",
+        uselist=False,
+    )
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    menu_item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("menu_items.id"),
+        nullable=False,
+    )
+
+    item_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    item_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("orders.id"),
+        unique=True,
+        nullable=False,
+    )
+
+    payment_provider: Mapped[PaymentProvider] = mapped_column(
+        Enum(PaymentProvider),
+        nullable=False,
+    )
+
+    transaction_id: Mapped[str | None] = mapped_column(String(255))
+
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="INR")
+
+    status: Mapped[PaymentStatus] = mapped_column(
+        Enum(PaymentStatus),
+        default=PaymentStatus.PENDING,
+    )
+
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
     )
