@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
-
+import uuid
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -68,7 +68,9 @@ def verify_access_token(token: str) -> str | None:
         return None
 
     else:
-        return payload.get("sub")
+        return {
+            "user_id": payload.get("sub"),
+        }
 
 
 async def get_current_user(
@@ -82,30 +84,30 @@ async def get_current_user(
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            details="Invalid or Expired Token",
+            detail="Invalid or Expired Token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     try:
 
-        user_id_int = int(user_id)
+        user_id_uuid = uuid.UUID(user_id)
 
     except (TypeError, ValueError):
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            details="Invalid or Expired Token",
+            detail="Invalid or Expired Token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    result = await db.execute(select(models.User).where(models.User.id == user_id_int))
+    result = await db.execute(select(models.User).where(models.User.id == user_id_uuid))
 
     user = result.scalars().first()
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            details="Invalid or Expired Token",
+            detail="Invalid or Expired Token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
