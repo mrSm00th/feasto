@@ -33,7 +33,7 @@ class VegType(str, enum.Enum):
     NON_VEG = "NON_VEG"
 
 
-class ImageType(str, Enum):
+class ImageType(str, enum.Enum):
     BANNER = "BANNER"
     LOGO = "LOGO"
     GALLERY = "GALLERY"
@@ -62,7 +62,20 @@ class PaymentProvider(str, enum.Enum):
     RAZORPAY = "RAZORPAY"
     COD = "COD"
 
+class ApplicationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
+
+class DayOfWeek(str, Enum):
+    MONDAY = "MONDAY"
+    TUESDAY = "TUESDAY"
+    WEDNESDAY = "WEDNESDAY"
+    THURSDAY = "THURSDAY"
+    FRIDAY = "FRIDAY"
+    SATURDAY = "SATURDAY"
+    SUNDAY = "SUNDAY"
 class User(Base):
     __tablename__ = "users"
 
@@ -73,7 +86,7 @@ class User(Base):
     )
 
     full_name: Mapped[str] = mapped_column(
-        String(255),
+        String(120),
         nullable=False,
     )
 
@@ -117,6 +130,7 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
     
     # RELATIONSHIPS
@@ -144,6 +158,10 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
+    owner_applications: Mapped[list["OwnerApplication"]] = relationship(
+    back_populates="user",
+    cascade="all, delete-orphan",
+    )
 
 class Address(Base):
     __tablename__ = "addresses"
@@ -218,6 +236,7 @@ class Address(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # RELATIONSHIP
@@ -231,6 +250,78 @@ class Address(Base):
     )
 
 
+
+
+# OWNER APPLICATION MODEL
+
+class OwnerApplication(Base):
+    __tablename__ = "owner_applications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    restaurant_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    fssai_number: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+
+    gst_number: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+    )
+
+    pan_masked: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    bank_masked: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+
+    status: Mapped[ApplicationStatus] = mapped_column(
+        Enum(ApplicationStatus),
+        default=ApplicationStatus.PENDING,
+        index=True,
+    )
+
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+
+    # RELATIONSHIPS
+    
+
+    user: Mapped["User"] = relationship(
+        back_populates="owner_applications",
+    )
 class Restaurant(Base):
     __tablename__ = "restaurants"
 
@@ -310,7 +401,9 @@ class Restaurant(Base):
         nullable=True,
     )
 
-    is_open: Mapped[bool] = mapped_column(
+    # when the owner temporarily closes the restaurant for the day or for a specific period
+    # they can set this flag to true. This will help in hiding the restaurant from the customers during that period.
+    is_manually_closed: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
     )
@@ -366,8 +459,56 @@ class Restaurant(Base):
         back_populates="restaurant",
     )
 
+    availability: Mapped[list[RestaurantAvailability]] = relationship(
+        back_populates="restaurant",
+        cascade="all, delete-orphan",
+    )
+
+class RestaurantAvailability(Base):
+    
+    __tablename__ = "restaurant_availability"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, default=uuid.uuid4, index=True
+    )
+
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        nullable= False,
+        index= True,
+    )
+
+    day_of_week: Mapped[DayOfWeek] = mapped_column(
+        Enum(DayOfWeek),
+        nullable=False,
+    )
+
+    opening_time: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    closing_time: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    is_closed: Mapped[bool] = mapped_column(
+        Boolean,
+        default = False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
 
+    restaurant: Mapped[Restaurant] = relationship(back_populates="availability")
 
 class RestaurantImage(Base):
 
@@ -380,7 +521,7 @@ class RestaurantImage(Base):
         ForeignKey("restaurants.id", ondelete="CASCADE"), nullable=False
     )
     image_url: Mapped[str] = mapped_column(Text, nullable=False)
-    image_type: Mapped[ImageType] = mapped_column(ImageType, default=ImageType.GALLARY)
+    image_type: Mapped[ImageType] = mapped_column(ImageType, default=ImageType.GALLERY)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     alt_text: Mapped[str | None] = mapped_column(String(255), nullable=False)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -549,7 +690,7 @@ class Cart(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key = True,
-        default = lambda: uuid.uuid4,
+        default = uuid.uuid4,
         index = True,
     )
 
@@ -578,7 +719,8 @@ class Cart(Base):
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default = lambda: datetime.now(UTC),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     #RELATIONSHIPS
@@ -600,7 +742,7 @@ class CartItem(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key = True,
-        default = lambda: uuid.uuid4,
+        default = uuid.uuid4,
         index = True,
     )
 
@@ -611,7 +753,7 @@ class CartItem(Base):
     )
 
     menu_item_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("menuitems.id"),
+        ForeignKey("menu_items.id"),
         nullable= False,
         index = True,
     )
@@ -637,7 +779,10 @@ class CartItem(Base):
     )
 
 class Order(Base):
+
+    # NOTE- intentionally storing duplicate data to maintain correct order history
     __tablename__ = "orders"
+
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -658,10 +803,43 @@ class Order(Base):
         index=True,
     )
 
+    restaurant_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable = False,
+    )
+
     address_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("addresses.id"),
         nullable=False,
     )
+
+
+    phone_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    address: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    latitude: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 7),
+        nullable=True,
+    )
+
+    longitude: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 7),
+        nullable=True,
+    )
+
+
 
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus),
@@ -715,6 +893,19 @@ class Order(Base):
         uselist=False,
     )
 
+    user = relationship(
+        "User", 
+        back_populates="orders",
+    )
+    restaurant = relationship(
+        "Restaurant",
+        back_populates="orders",
+    )
+    address = relationship(
+        "Address",
+        back_populates="orders",
+    )
+
 class OrderItem(Base):
     __tablename__ = "order_items"
 
@@ -746,6 +937,9 @@ class OrderItem(Base):
         default=lambda: datetime.now(UTC),
     )
 
+
+    menu_item: Mapped[MenuItem] = relationship(back_populates="order_items")
+    order: Mapped[Order] = relationship(back_populates="items")
 
 
 
@@ -785,6 +979,8 @@ class Payment(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
     )
+
+    order: Mapped[Order] = relationship(back_populates="payment")
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
