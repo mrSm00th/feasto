@@ -70,6 +70,7 @@ def verify_access_token(token: str) -> str | None:
     else:
         return {
             "user_id": payload.get("sub"),
+            "role": payload.get("role"),
         }
 
 
