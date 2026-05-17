@@ -9,7 +9,7 @@ class BaseSchema(BaseModel):
 
 
 class Token(BaseModel):
-    access_token: set
+    access_token: str
     token_type: str
 
 
@@ -38,7 +38,7 @@ class UserPublic(BaseSchema):
     is_verified: bool
 
 
-class userPrivate(UserPublic):
+class UserPrivate(UserPublic):
 
     email: EmailStr
     phone_number: str
