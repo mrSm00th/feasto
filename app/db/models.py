@@ -69,7 +69,7 @@ class ApplicationStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
-class DayOfWeek(str, Enum):
+class DayOfWeek(str, enum.Enum):
     MONDAY = "MONDAY"
     TUESDAY = "TUESDAY"
     WEDNESDAY = "WEDNESDAY"
@@ -365,7 +365,7 @@ class Restaurant(Base):
     )
 
     veg_type: Mapped[VegType] = mapped_column(
-        VegType,
+        Enum(VegType),
         default=VegType.VEG,
     )
 
@@ -524,7 +524,7 @@ class RestaurantImage(Base):
         ForeignKey("restaurants.id", ondelete="CASCADE"), nullable=False
     )
     image_url: Mapped[str] = mapped_column(Text, nullable=False)
-    image_type: Mapped[ImageType] = mapped_column(ImageType, default=ImageType.GALLERY)
+    image_type: Mapped[ImageType] = mapped_column(Enum(ImageType), default=ImageType.GALLERY)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     alt_text: Mapped[str | None] = mapped_column(String(255), nullable=False)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -779,6 +779,13 @@ class CartItem(Base):
         default=lambda: datetime.now(UTC),
     )
 
+    menu_item: Mapped[MenuItem] = relationship(
+    back_populates="cart_items"
+    )
+
+    cart: Mapped[Cart] = relationship(
+        back_populates="items"
+    )
 
 class Order(Base):
 
@@ -1006,4 +1013,9 @@ class RefreshToken(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+
+    user: Mapped[User] = relationship(
+        back_populates="refresh_tokens"
     )
