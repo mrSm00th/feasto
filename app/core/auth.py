@@ -69,10 +69,7 @@ def verify_access_token(token: str) -> str | None:
         return None
 
     else:
-        return {
-            "user_id": payload.get("sub"),
-            "role": payload.get("role"),
-        }
+        return payload.get("sub")
 
 
 async def get_current_user(
