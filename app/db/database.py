@@ -3,7 +3,15 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-engine = create_async_engine(settings.database_url)
+# engine = create_async_engine(settings.database_url)
+
+# Switched to sqlite for development, will switch back to postgres for production
+SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///./blog.db"
+
+engine = create_async_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,

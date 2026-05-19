@@ -9,9 +9,11 @@ from pwdlib import PasswordHash
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import app.db.models as models
 from app.core.config import settings
 from app.db.database import get_db
+
+# import app.db.models as models
+from app.modules.users.models import User
 
 password_hash = PasswordHash.recommended()
 
@@ -75,7 +77,7 @@ def verify_access_token(token: str) -> str | None:
 async def get_current_user(
     token: Annotated[str, Depends(oauth_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> models.User:
+) -> User:
 
     user_id = verify_access_token(token)
 
@@ -99,7 +101,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    result = await db.execute(select(models.User).where(models.User.id == user_id_uuid))
+    result = await db.execute(select(User).where(User.id == user_id_uuid))
 
     user = result.scalars().first()
 
@@ -113,4 +115,4 @@ async def get_current_user(
     return user
 
 
-CurrentUser = Annotated[models.User, Depends(get_current_user)]
+CurrentUser = Annotated[User, Depends(get_current_user)]

@@ -38,3 +38,7 @@ htmlcov/
 .pytest_cache/
 
 snippets.txt
+
+app/db/models.py
+
+app/routers.py

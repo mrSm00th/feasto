@@ -1,0 +1,264 @@
+import enum
+import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+    Uuid,
+    desc,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.database import Base
+
+
+class UserRole(str, enum.Enum):
+    CUSTOMER = "CUSTOMER"
+    RESTAURANT_OWNER = "RESTAURANT_OWNER"
+    ADMIN = "ADMIN"
+
+
+class UserStatus(str, enum.Enum):
+
+    ACTIVE = "ACTIVE"  # fully usable account
+    DEACTIVATED = (
+        "DEACTIVATED"  # user deactivaed their account, can be reactivated by user
+    )
+    SUSPENDED = (
+        "SUSPENDED "  # admin level action, can be reactivated by admin after review
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    full_name: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+    )
+
+    email: Mapped[str] = mapped_column(
+        String(120),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    phone_number: Mapped[str] = mapped_column(
+        String(20),
+        unique=True,
+        nullable=False,
+    )
+
+    password_hash: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole),
+        default=UserRole.CUSTOMER,
+    )
+
+    user_status: Mapped[UserStatus] = mapped_column(
+        Enum(UserStatus),
+        default=UserStatus.ACTIVE,
+        nullable=False,
+        index=True,
+    )
+
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    suspended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # RELATIONSHIPS
+
+    addresses: Mapped[list["Address"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    restaurants: Mapped[list["Restaurant"]] = relationship(
+        back_populates="owner",
+    )
+
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="user",
+    )
+
+    cart: Mapped[Optional["Cart"]] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    owner_applications: Mapped[list["OwnerApplication"]] = relationship(
+        back_populates="applicant",
+        cascade="all, delete-orphan",
+        # order_by=lambda: desc("OwnerApplication.created_at"),
+        foreign_keys="[OwnerApplication.applicant_id]",
+    )
+
+    reviewed_applications: Mapped[list["OwnerApplication"]] = relationship(
+        back_populates="reviewer",
+        foreign_keys="[OwnerApplication.reviewed_by]",
+    )
+
+
+class Address(Base):
+    __tablename__ = "addresses"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
+    label: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    address_line_1: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    address_line_2: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    city: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    state: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    postal_code: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    country: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    latitude: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 7),
+        nullable=True,
+    )
+
+    longitude: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 7),
+        nullable=True,
+    )
+
+    is_default: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    # RELATIONSHIP
+
+    user: Mapped["User"] = relationship(
+        back_populates="addresses",
+    )
+
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="address",
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    user: Mapped[User] = relationship(back_populates="refresh_tokens")

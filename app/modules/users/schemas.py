@@ -3,6 +3,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.modules.users.models import UserStatus
+
 
 class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -25,16 +27,16 @@ class UserCreate(BaseSchema):
     email: EmailStr
     phone_number: Annotated[str, Field(min_length=7, max_length=15)]
     password: Annotated[str, Field(min_length=8, max_length=128)]
-    role: UserRole
-    is_active: Annotated[bool, Field(default=True)]
-    is_verified: Annotated[bool, Field(default=True)]
+    # role: UserRole
+    # is_active: Annotated[bool, Field(default=True)]
+    # is_verified: Annotated[bool, Field(default=True)]
 
 
 class UserPublic(BaseSchema):
 
     full_name: str
     role: UserRole
-    is_active: bool
+    user_status: UserStatus
     is_verified: bool
 
 
