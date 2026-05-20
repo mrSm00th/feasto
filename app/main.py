@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 import app.db.models_registry
 from app.db.database import Base, engine, get_db
 from app.modules.admin import router as admin
-from app.modules.owner_applications import router as owner_applications
+from app.modules.partner_applications import router as partner_applications
 from app.modules.users import router as users
 
 
@@ -24,5 +24,5 @@ app = FastAPI(lifespan=lifespan)
 
 
 app.include_router(users.router)
-app.include_router(owner_applications.router)
+app.include_router(partner_applications.router)
 app.include_router(admin.router)

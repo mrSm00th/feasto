@@ -4,39 +4,38 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.owner_applications.models import ApplicationStatus
+from app.modules.partner_applications.models import ApplicationStatus
 
 
 class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class OwnerApplicationCreate(BaseSchema):
+class PartnerApplicationCreate(BaseSchema):
 
-    restaurant_name: Annotated[str, Field(min_length=3, max_length=100)]
     fssai_license_number: Annotated[str, Field(min_length=14, max_length=14)]
     gst_number: Annotated[str, Field(min_length=15, max_length=15)]
 
 
-class OwnerApplicationResponse(
-    OwnerApplicationCreate
+class PartnerApplicationResponse(
+    PartnerApplicationCreate
 ):  # only sending the response to the owner
 
     id: uuid.UUID
     status: ApplicationStatus
-    rejection_reason: Annotated[str | None, Field(max_length=500)]
+    created_at: datetime
+    # rejection_reason: Annotated[str | None, Field(max_length=500)]
 
 
-class OwnerApplicationMini(BaseSchema):
+class PartnerApplicationMini(BaseSchema):
 
     id: uuid.UUID
-    restaurant_name: str
     status: ApplicationStatus
     created_at: datetime
 
 
-class PaginatedOwnerAppResponse(BaseSchema):
-    applications: list[OwnerApplicationMini]
+class PaginatedPartnerAppResponse(BaseSchema):
+    applications: list[PartnerApplicationMini]
     total: int
     skip: int
     limit: int

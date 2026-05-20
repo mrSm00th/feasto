@@ -14,8 +14,8 @@ class ApplicationStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
-class OwnerApplication(Base):
-    __tablename__ = "owner_applications"
+class PartnerApplication(Base):
+    __tablename__ = "partner_applications"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -30,33 +30,19 @@ class OwnerApplication(Base):
         index=True,
     )
 
-    restaurant_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-
     fssai_license_number: Mapped[str] = mapped_column(
         String(14),
         nullable=False,
         index=True,
-        unique=True,
+        unique=False,
     )
 
     gst_number: Mapped[str | None] = mapped_column(
         String(15),
         nullable=True,
         index=True,
+        unique=False,
     )
-
-    # pan_number: Mapped[str] = mapped_column(
-    #     String(10),
-    #     nullable=False,
-    # )
-
-    # bank_account_number: Mapped[str] = mapped_column(
-    #     String(50),
-    #     nullable=False,
-    # )
 
     status: Mapped["ApplicationStatus"] = mapped_column(
         Enum(ApplicationStatus),
@@ -86,7 +72,7 @@ class OwnerApplication(Base):
     applicant: Mapped["User"] = relationship(
         "User",
         foreign_keys=[applicant_id],
-        back_populates="owner_applications",
+        back_populates="partner_applications",
     )
 
     reviewer: Mapped["User"] = relationship(

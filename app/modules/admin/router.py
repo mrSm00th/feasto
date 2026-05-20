@@ -13,12 +13,15 @@ from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.admin.schemas import (
-    OwnerApplicationAdminReview,
-    OwnerApplicationDetailed,
     PaginatedApplicationResponse,
+    PartnerApplicationAdminReview,
+    PartnerApplicationDetailed,
     PendingApplicationsList,
 )
-from app.modules.owner_applications.models import ApplicationStatus, OwnerApplication
+from app.modules.partner_applications.models import (
+    ApplicationStatus,
+    PartnerApplication,
+)
 from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
 
@@ -26,7 +29,7 @@ router = APIRouter(prefix="/api/admin", tags=["admins"])
 
 
 @router.post(
-    "",
+    "/",
     response_model=UserPrivate,
     status_code=status.HTTP_201_CREATED,
 )
@@ -99,17 +102,17 @@ async def paginated_pending_applications(
 ):
     result_count = await db.execute(
         select(func.count())
-        .select_from(OwnerApplication)
-        .where(OwnerApplication.status == ApplicationStatus.PENDING)
+        .select_from(PartnerApplication)
+        .where(PartnerApplication.status == ApplicationStatus.PENDING)
     )
 
     total = result_count.scalar() or 0
 
     result = await db.execute(
-        select(OwnerApplication)
-        .options(selectinload(OwnerApplication.applicant))
-        .where(OwnerApplication.status == ApplicationStatus.PENDING)
-        .order_by(OwnerApplication.created_at.desc())
+        select(PartnerApplication)
+        .options(selectinload(PartnerApplication.applicant))
+        .where(PartnerApplication.status == ApplicationStatus.PENDING)
+        .order_by(PartnerApplication.created_at.desc())
         .offset(skip)
         .limit(limit)
     )
@@ -133,7 +136,7 @@ async def paginated_pending_applications(
 # route for all pending applications
 @router.get(
     "/owner-applications/{id}",
-    response_model=OwnerApplicationDetailed,
+    response_model=PartnerApplicationDetailed,
     status_code=status.HTTP_200_OK,
 )
 async def onwer_application_detailed(
@@ -143,9 +146,9 @@ async def onwer_application_detailed(
 ):
 
     result = await db.execute(
-        select(OwnerApplication)
-        .options(selectinload(OwnerApplication.applicant))
-        .where(OwnerApplication.id == id)
+        select(PartnerApplication)
+        .options(selectinload(PartnerApplication.applicant))
+        .where(PartnerApplication.id == id)
     )
 
     application = result.scalars().first()
@@ -155,7 +158,7 @@ async def onwer_application_detailed(
 
 @router.patch(
     "/owner-applications/{id}/review",
-    response_model=OwnerApplicationAdminReview,
+    response_model=PartnerApplicationAdminReview,
 )
 async def review_owner_application(
     id: uuid.UUID,
@@ -166,9 +169,9 @@ async def review_owner_application(
 ):
 
     result = await db.execute(
-        select(OwnerApplication)
-        .options(selectinload(OwnerApplication.applicant))
-        .where(OwnerApplication.id == id)
+        select(PartnerApplication)
+        .options(selectinload(PartnerApplication.applicant))
+        .where(PartnerApplication.id == id)
     )
 
     application = result.scalars().first()
