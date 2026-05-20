@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,16 +13,14 @@ from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.admin.schemas import (
+    OwnerApplicationAdminReview,
     OwnerApplicationDetailed,
     PaginatedApplicationResponse,
     PendingApplicationsList,
-    OwnerApplicationAdminReview,
 )
 from app.modules.owner_applications.models import ApplicationStatus, OwnerApplication
-from app.modules.users.models import UserRole, User
+from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
-
-from datetime import datetime, UTC
 
 router = APIRouter(prefix="/api/admin", tags=["admins"])
 
@@ -156,17 +155,16 @@ async def onwer_application_detailed(
 
 @router.patch(
     "/owner-applications/{id}/review",
-    response_model = OwnerApplicationAdminReview,
+    response_model=OwnerApplicationAdminReview,
 )
 async def review_owner_application(
     id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    approve:bool,
+    approve: bool,
     rejection_reason: Annotated[str | None, Query(max_length=500)] = None,
 ):
 
-    
     result = await db.execute(
         select(OwnerApplication)
         .options(selectinload(OwnerApplication.applicant))
@@ -192,10 +190,9 @@ async def review_owner_application(
         application.applicant.role = UserRole.RESTAURANT_OWNER
     else:
         application.status = ApplicationStatus.REJECTED
-        
+
         if rejection_reason:
             application.rejection_reason = rejection_reason
-
 
     application.reviewed_by = current_user.id
     application.reviewed_at = datetime.now(UTC)

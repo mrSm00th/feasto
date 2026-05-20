@@ -1,24 +1,25 @@
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
+from app.modules.admin.schemas import OwnerApplicationDetailed
 from app.modules.owner_applications.models import OwnerApplication
 from app.modules.owner_applications.schemas import (
     OwnerApplicationCreate,
+    OwnerApplicationMini,
     OwnerApplicationResponse,
     PaginatedOwnerAppResponse,
-    OwnerApplicationMini,
 )
-from app.modules.users.models import UserRole, User
-from app.modules.admin.schemas import OwnerApplicationDetailed
-from app.core.config import settings
-import uuid
+from app.modules.users.models import User, UserRole
+
 router = APIRouter(prefix="/api/owner-applications", tags=["owner applications"])
 
 
@@ -32,7 +33,6 @@ async def create_owner_application(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
 ):
-    
 
     result = await db.execute(
         select(OwnerApplication)
@@ -67,18 +67,21 @@ async def create_owner_application(
 
     return new_application
 
-#get all the user applications
+
+# get all the user applications
 @router.get(
     "/applications",
-    response_model= PaginatedOwnerAppResponse,
+    response_model=PaginatedOwnerAppResponse,
 )
 async def get_owner_applications_paginated(
-    current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))],
+    current_user: Annotated[
+        User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
+    ],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page,
 ):
-    
+
     result_count = await db.execute(
         select(func.count())
         .select_from(OwnerApplication)
@@ -114,37 +117,32 @@ async def get_owner_applications_paginated(
 # get the particular apllication of the owner by app_id
 @router.get(
     "/applications/{id}",
-    response_model= OwnerApplicationDetailed,
+    response_model=OwnerApplicationDetailed,
 )
 async def get_owner_application_by_id(
-        id: uuid.UUID,
-        db: Annotated[AsyncSession, Depends(get_db)],
-        current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))]
+    id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[
+        User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
+    ],
 ):
-    
-    result = await db.execute(
-        select(OwnerApplication)
-        .where(OwnerApplication.id == id)
-    )
+
+    result = await db.execute(select(OwnerApplication).where(OwnerApplication.id == id))
 
     application = result.scalars().first()
 
     if not application:
 
         raise HTTPException(
-            status_code = status.HTTP_404_NOT_FOUND,
-            detail = "Application not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
         )
 
     if application.applicant_id != current_user.id:
 
         raise HTTPException(
-            status_code = status.HTTP_403_FORBIDDEN,
-            detail = "You don't have permission to access this application",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to access this application",
         )
-    
 
     return application
-    
-    
-    
