@@ -15,10 +15,13 @@ from app.modules.admin.schemas import (
     OwnerApplicationDetailed,
     PaginatedApplicationResponse,
     PendingApplicationsList,
+    OwnerApplicationAdminReview,
 )
 from app.modules.owner_applications.models import ApplicationStatus, OwnerApplication
-from app.modules.users.models import UserRole
+from app.modules.users.models import UserRole, User
 from app.modules.users.schemas import UserCreate, UserPrivate
+
+from datetime import datetime, UTC
 
 router = APIRouter(prefix="/api/admin", tags=["admins"])
 
@@ -90,7 +93,7 @@ async def create_admin(
     status_code=status.HTTP_200_OK,
 )
 async def paginated_pending_applications(
-    current_user=Depends(require_roles(UserRole.ADMIN)),
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: AsyncSession = Depends(get_db),
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page,
@@ -136,7 +139,7 @@ async def paginated_pending_applications(
 )
 async def onwer_application_detailed(
     id: uuid.UUID,
-    current_user=Depends(require_roles(UserRole.ADMIN)),
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: AsyncSession = Depends(get_db),
 ):
 
@@ -147,5 +150,57 @@ async def onwer_application_detailed(
     )
 
     application = result.scalars().first()
+
+    return application
+
+
+@router.patch(
+    "/owner-applications/{id}/review",
+    response_model = OwnerApplicationAdminReview,
+)
+async def review_owner_application(
+    id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    approve:bool,
+    rejection_reason: Annotated[str | None, Query(max_length=500)] = None,
+):
+
+    
+    result = await db.execute(
+        select(OwnerApplication)
+        .options(selectinload(OwnerApplication.applicant))
+        .where(OwnerApplication.id == id)
+    )
+
+    application = result.scalars().first()
+
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    if application.status != ApplicationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending applications can be reviewed",
+        )
+
+    if approve:
+        application.status = ApplicationStatus.APPROVED
+        application.applicant.role = UserRole.RESTAURANT_OWNER
+    else:
+        application.status = ApplicationStatus.REJECTED
+        
+        if rejection_reason:
+            application.rejection_reason = rejection_reason
+
+
+    application.reviewed_by = current_user.id
+    application.reviewed_at = datetime.now(UTC)
+
+    await db.commit()
+    await db.refresh(application)
 
     return application

@@ -49,8 +49,8 @@ class OwnerApplicationAdminReview(
 
     id: uuid.UUID
     restaurant_name: Annotated[str, Field(min_length=3, max_length=100)]
-
+    applicant: UserPublic
     status: ApplicationStatus
-    rejection_reason: Annotated[str | None, Field(max_length=500)]
+    rejection_reason: Annotated[str | None, Field(max_length=500)]= None
     reviewed_by: uuid.UUID
     reviewed_at: datetime
