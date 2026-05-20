@@ -22,6 +22,7 @@ from app.db.database import Base
 
 class UserRole(str, enum.Enum):
     CUSTOMER = "CUSTOMER"
+    # PENDING_PARTNER = "PENDING_PARTNER"
     RESTAURANT_OWNER = "RESTAURANT_OWNER"
     ADMIN = "ADMIN"
 
@@ -81,7 +82,8 @@ class User(Base):
         index=True,
     )
 
-    is_verified: Mapped[bool] = mapped_column(
+    # later add enum for account status like active, suspended, deactivated etc and handle accordingly in the app
+    is_account_verified: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=True,
@@ -133,16 +135,15 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
-    owner_applications: Mapped[list["OwnerApplication"]] = relationship(
+    partner_applications: Mapped[list["PartnerApplication"]] = relationship(
         back_populates="applicant",
         cascade="all, delete-orphan",
-        # order_by=lambda: desc("OwnerApplication.created_at"),
-        foreign_keys="[OwnerApplication.applicant_id]",
+        foreign_keys="[PartnerApplication.applicant_id]",
     )
 
-    reviewed_applications: Mapped[list["OwnerApplication"]] = relationship(
+    reviewed_applications: Mapped[list["PartnerApplication"]] = relationship(
         back_populates="reviewer",
-        foreign_keys="[OwnerApplication.reviewed_by]",
+        foreign_keys="[PartnerApplication.reviewed_by]",
     )
 
 

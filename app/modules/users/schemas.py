@@ -29,7 +29,7 @@ class UserCreate(BaseSchema):
     password: Annotated[str, Field(min_length=8, max_length=128)]
     # role: UserRole
     # is_active: Annotated[bool, Field(default=True)]
-    # is_verified: Annotated[bool, Field(default=True)]
+    # is_account_verified: Annotated[bool, Field(default=True)]
 
 
 class UserPublic(BaseSchema):
@@ -37,7 +37,7 @@ class UserPublic(BaseSchema):
     full_name: str
     role: UserRole
     user_status: UserStatus
-    is_verified: bool
+    is_account_verified: bool
 
 
 class UserPrivate(UserPublic):

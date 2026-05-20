@@ -8,7 +8,7 @@ from app.modules.menus.models import Category, MenuItem, MenuItemImage
 from app.modules.orders.models import Order, OrderItem
 
 # OWNER APPLICATIONS
-from app.modules.owner_applications.models import OwnerApplication
+from app.modules.partner_applications.models import PartnerApplication
 
 # PAYMENTS
 from app.modules.payments.models import Payment
