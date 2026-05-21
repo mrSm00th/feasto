@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -36,7 +37,11 @@ class DayOfWeek(str, enum.Enum):
 
 
 class RestaurantStatus(str, enum.Enum):
-    INCOMPLETE = "INCOMPLETE"
+    DRAFT = "DRAFT"
+    BASIC_INFO_ADDED = "BASIC_INFO_ADDED"
+    DOCUMENTS_ADDED = "DOCUMENTS_ADDED"
+    MENU_ADDED = "MENU_ADDED"
+    SUBMITTED = "SUBMITTED"
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
 
@@ -70,6 +75,11 @@ class Restaurant(Base):
         nullable=False,
     )
 
+    normalized_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
     slug: Mapped[str] = mapped_column(
         String(255),
         unique=True,
@@ -79,14 +89,16 @@ class Restaurant(Base):
 
     fssai_license_number: Mapped[str] = mapped_column(
         String(14),
-        unique=True,
-        nullable=False,
+        unique=False,
+        nullable=True,
         index=True,
     )
 
-    description: Mapped[str | None] = mapped_column(
-        Text,
+    gst_number: Mapped[str] = mapped_column(
+        String(15),
+        unique=False,
         nullable=True,
+        index=True,
     )
 
     cuisine_type: Mapped[str | None] = mapped_column(
@@ -101,13 +113,12 @@ class Restaurant(Base):
 
     phone_number: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    email: Mapped[str] = mapped_column(
+    address_line_1: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        unique=True,
     )
 
-    address_line_1: Mapped[str] = mapped_column(
+    normalized_address_line_1: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
@@ -118,6 +129,11 @@ class Restaurant(Base):
     )
 
     city: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    normalized_city: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
     )
@@ -169,7 +185,17 @@ class Restaurant(Base):
     # admin level control
     status: Mapped[RestaurantStatus] = mapped_column(
         Enum(RestaurantStatus),
-        default=RestaurantStatus.INCOMPLETE,
+        default=RestaurantStatus.DRAFT,
+    )
+
+    is_submitted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     avg_rating: Mapped[Decimal] = mapped_column(
@@ -225,6 +251,12 @@ class Restaurant(Base):
     availability: Mapped[list["RestaurantAvailability"]] = relationship(
         back_populates="restaurant",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            owner_id, normalized_name, normalized_address_line_1, normalized_city
+        ),
     )
 
 
