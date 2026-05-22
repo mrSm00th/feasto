@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -313,23 +314,42 @@ class RestaurantImage(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, default=uuid.uuid4, index=True
     )
+
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("restaurants.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
-    image_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    image_path: Mapped[str] = mapped_column(Text, nullable=False)
+
     image_type: Mapped[ImageType] = mapped_column(
         Enum(ImageType), default=ImageType.GALLERY
     )
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    alt_text: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    # alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-    )
+
+    # updated_at: Mapped[datetime] = mapped_column(
+    #     DateTime(timezone=True),
+    #     default=lambda: datetime.now(UTC),
+    #     onupdate=lambda: datetime.now(UTC),
+    # )
 
     restaurant: Mapped[Restaurant] = relationship(back_populates="restaurant_images")
+
+    __table_args__ = (
+        Index(
+            "unique_primary_per_restaurant",
+            "restaurant_id",
+            unique=True,
+            postgresql_where=(is_primary == True),
+        ),
+    )

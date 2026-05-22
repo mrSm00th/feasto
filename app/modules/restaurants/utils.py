@@ -1,12 +1,14 @@
 import uuid
 from io import BytesIO
 from math import asin, cos, radians, sin, sqrt
-from pathlib import Path
 
+import boto3
 from PIL import Image, ImageOps
 from slugify import slugify
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.modules.restaurants.models import Restaurant
 
 
@@ -43,32 +45,87 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return c * r
 
 
-RESTAURANT_PICS_DIR = Path("media\restaurant_pics")
+MAX_IMAGE_PIXELS = 20_000_000
+ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 
 
-def process_restaurant_image(content: bytes) -> str:
+def _get_s3_client():
+    return boto3.client(
+        "s3",
+        region_name=settings.s3_region,
+        aws_access_key_id=(
+            settings.s3_access_key_id.get_secret_value()
+            if settings.s3_access_key_id
+            else None
+        ),
+        aws_secret_access_key=(
+            settings.s3_secret_access_key.get_secret_value()
+            if settings.s3_secret_access_key
+            else None
+        ),
+        endpoint_url=settings.s3_endpoint_url,
+    )
+
+
+def process_image(content: bytes) -> tuple[bytes, str]:
+    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
     with Image.open(BytesIO(content)) as original:
+        if original.format not in ALLOWED_FORMATS:
+            raise ValueError("Unsupported image format")
+
         img = ImageOps.exif_transpose(original)
 
-        img = ImageOps.fit(img, (300, 300), method=Image.Resampling.LANCZOS)
+        img = ImageOps.fit(
+            img,
+            (300, 300),
+            method=Image.Resampling.LANCZOS,
+        )
 
         if img.mode in ("RGBA", "LA", "P"):
             img = img.convert("RGB")
 
         filename = f"{uuid.uuid4().hex}.jpg"
-        filepath = RESTAURANT_PICS_DIR / filename
 
-        RESTAURANT_PICS_DIR.mkdir(parents=True, exist_ok=True)
+        output = BytesIO()
 
-        img.save(filepath, "JPEG", quality=85, optimize=True)
+        img.save(
+            output,
+            "JPEG",
+            quality=85,
+            optimize=True,
+        )
 
-    return filename
+        output.seek(0)
+
+    return output.read(), filename
 
 
-def delete_restaurant_image(filename: str | None) -> None:
+def _upload_to_s3(file_bytes: bytes, key: str) -> None:
+    s3 = _get_s3_client()
+    s3.upload_fileobj(
+        BytesIO(file_bytes),
+        settings.s3_bucket_name,
+        key,
+        ExtraArgs={
+            "ContentType": "image/jpeg",
+            "CacheControl": "max-age=31536000",
+        },
+    )
+
+
+def _delete_from_s3(key: str) -> None:
+    s3 = _get_s3_client()
+    s3.delete_object(Bucket=settings.s3_bucket_name, Key=key)
+
+
+async def upload_image(file_bytes: bytes, filename: str) -> None:
+    key = f"profile_pics/{filename}"
+    await run_in_threadpool(_upload_to_s3, file_bytes, key)
+
+
+async def delete_image(filename: str | None) -> None:
     if filename is None:
         return
-
-    filepath = RESTAURANT_PICS_DIR / filename
-    if filepath.exists():
-        filepath.unlink()
+    key = f"profile_pics/{filename}"
+    await run_in_threadpool(_delete_from_s3, key)

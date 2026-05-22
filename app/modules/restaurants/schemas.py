@@ -38,3 +38,22 @@ class RestaurantDocumentsUploadResponse(RestaurantDocumentsUpload):
 
     id: uuid.UUID
     status: RestaurantStatus
+
+
+class ImageResponse(BaseSchema):
+
+    id: uuid.UUID
+    image_path: str
+
+
+class RestaurantImageUploadResponse(BaseSchema):
+
+    uploaded: Annotated[int, Field(max_length=5)]
+    images: list[ImageResponse]
+
+
+class PrimaryImageUpdate(BaseSchema):
+
+    id: uuid.UUID
+    image_path: str
+    is_primary: bool
