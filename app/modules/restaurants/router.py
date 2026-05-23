@@ -230,3 +230,73 @@ async def upload_restaurant_images(
 
         await db.rollback()
         raise HTTPException(500, "Image upload failed") from e
+
+
+@router.patch(
+    "/{restaurant_id}/images/{image_id}/make-primary",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def set_primary_restaurant_image(
+    restaurant_id: uuid.UUID,
+    image_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    restaurant = await db.scalar(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id, Restaurant.owner_id == current_user.id
+        )
+    )
+
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    image = await db.scalar(
+        select(RestaurantImage).where(
+            RestaurantImage.id == image_id,
+            RestaurantImage.restaurant_id == restaurant_id,
+        )
+    )
+
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    async with db.begin():
+
+        await db.execute(
+            update(RestaurantImage)
+            .where(RestaurantImage.restaurant_id == restaurant_id)
+            .values(is_primary=False)
+        )
+
+        await db.execute(
+            update(RestaurantImage)
+            .where(RestaurantImage.id == image_id)
+            .values(is_primary=True)
+        )
+
+    return Response(status_code=204)
+
+
+@router.delete("/{restaurant_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_restaurant(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    restaurant = await db.scalar(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id, Restaurant.owner_id == current_user.id
+        )
+    )
+
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    async with db.begin():
+
+        await db.delete(restaurant)
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

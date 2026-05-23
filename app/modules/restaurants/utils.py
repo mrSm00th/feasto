@@ -14,16 +14,20 @@ from app.modules.restaurants.models import Restaurant
 
 async def generate_unique_slug(db, name: str) -> str:
     base_slug = slugify(name)
-    slug = base_slug
+
+    result = await db.execute(
+        select(Restaurant.slug).where(Restaurant.slug.like(f"{base_slug}%"))
+    )
+    existing_slugs = {row[0] for row in result.all()}
+
+    if base_slug not in existing_slugs:
+        return base_slug
+
     counter = 1
-
-    while True:
-        existing = await db.execute(select(Restaurant).where(Restaurant.slug == slug))
-        if not existing.scalar():
-            return slug
-
-        slug = f"{base_slug}-{counter}"
+    while f"{base_slug}-{counter}" in existing_slugs:
         counter += 1
+
+    return f"{base_slug}-{counter}"
 
 
 def normalize(text: str) -> str:
