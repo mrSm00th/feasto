@@ -1,4 +1,5 @@
 import enum
+import uuid
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -27,9 +28,6 @@ class UserCreate(BaseSchema):
     email: EmailStr
     phone_number: Annotated[str, Field(min_length=7, max_length=15)]
     password: Annotated[str, Field(min_length=8, max_length=128)]
-    # role: UserRole
-    # is_active: Annotated[bool, Field(default=True)]
-    # is_account_verified: Annotated[bool, Field(default=True)]
 
 
 class UserPublic(BaseSchema):
@@ -44,3 +42,21 @@ class UserPrivate(UserPublic):
 
     email: EmailStr
     phone_number: str
+
+
+class RestaurantList(BaseSchema):
+
+    id: uuid.UUID
+    name: str
+    address_line_1: str
+    city: str
+    state: str
+
+
+class PaginatedOwnerRestaurant(BaseSchema):
+
+    restaurants: list[RestaurantList]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool

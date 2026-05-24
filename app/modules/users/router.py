@@ -1,10 +1,11 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 import app.modules.users.models as models
 from app.core.auth import (
@@ -14,8 +15,17 @@ from app.core.auth import (
     verify_password,
 )
 from app.core.config import settings
+from app.core.dependencies import require_roles
 from app.db.database import get_db
-from app.modules.users.schemas import Token, UserCreate, UserPrivate
+from app.modules.restaurants.models import Restaurant
+from app.modules.users.models import User, UserRole
+from app.modules.users.schemas import (
+    PaginatedOwnerRestaurant,
+    RestaurantList,
+    Token,
+    UserCreate,
+    UserPrivate,
+)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -115,3 +125,44 @@ async def login_for_access_token(
 @router.get("/me", response_model=UserPrivate)
 async def get_current_user(current_user: CurrentUser):
     return current_user
+
+
+@router.get(
+    "/me/restaurants",
+)
+async def get_current_user_restaurants(
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.restaurants_per_page,
+):
+
+    result = await db.execute(
+        select(func.count())
+        .select_from(Restaurant)
+        .where(Restaurant.owner_id == current_user.id)
+    )
+
+    total = result.scalar() or 0
+
+    result = await db.execute(
+        select(Restaurant)
+        .options(selectinload(Restaurant.primary_image))
+        .where(Restaurant.owner_id == current_user.id)
+        .order_by(Restaurant.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    restaurants = result.scalars().all()
+
+    has_more = skip + len(restaurants) < total
+
+    return PaginatedOwnerRestaurant(
+        restaurants=[
+            RestaurantList.model_validate(restaurant) for restaurant in restaurants
+        ],
+        total=total,
+        skip=skip,
+        limit=limit,
+        has_more=has_more,
+    )
