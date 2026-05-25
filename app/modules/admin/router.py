@@ -16,6 +16,8 @@ from app.modules.admin.schemas import (
     PaginatedApplicationResponse,
     PartnerApplicationAdminReview,
     PartnerApplicationDetailed,
+    PartnerApplicationHistory,
+    PartnerApplicationWithHistory,
     PendingApplicationsList,
 )
 from app.modules.partner_applications.models import (
@@ -136,7 +138,7 @@ async def paginated_pending_applications(
 # route for all pending applications
 @router.get(
     "/owner-applications/{id}",
-    response_model=PartnerApplicationDetailed,
+    response_model=PartnerApplicationWithHistory,
     status_code=status.HTTP_200_OK,
 )
 async def onwer_application_detailed(
@@ -153,7 +155,30 @@ async def onwer_application_detailed(
 
     application = result.scalars().first()
 
-    return application
+    if not application:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    history_result = await db.execute(
+        select(PartnerApplication)
+        .where(
+            PartnerApplication.applicant_id == application.applicant_id,
+            PartnerApplication.id != application.id,
+            PartnerApplication.status == ApplicationStatus.REJECTED,
+        )
+        .order_by(PartnerApplication.created_at.desc())
+        .limit(5)
+    )
+
+    history = history_result.scalars().all()
+
+    return PartnerApplicationWithHistory(
+        application=application,
+        history=history,
+    )
 
 
 @router.patch(
