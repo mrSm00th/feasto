@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -20,6 +21,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+
+
+class AvailabilityStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    OPEN_24_HOURS = "OPEN_24_HOURS"
 
 
 class VegType(str, enum.Enum):
@@ -166,16 +173,6 @@ class Restaurant(Base):
         index=True,
     )
 
-    opening_time: Mapped[time | None] = mapped_column(
-        Time,
-        nullable=True,
-    )
-
-    closing_time: Mapped[time | None] = mapped_column(
-        Time,
-        nullable=True,
-    )
-
     # when the owner temporarily closes the restaurant for the day or for a specific period
     # they can set this flag to true. This will help in hiding the restaurant from the customers during that period.
     is_manually_closed: Mapped[bool] = mapped_column(
@@ -245,6 +242,16 @@ class Restaurant(Base):
         cascade="all, delete-orphan",
     )
 
+    primary_image: Mapped["RestaurantImage | None"] = relationship(
+        primaryjoin=(
+            "and_(Restaurant.id == RestaurantImage.restaurant_id, "
+            "RestaurantImage.is_primary == True)"
+        ),
+        uselist=False,
+        viewonly=True,
+        lazy="raise",
+    )
+
     orders: Mapped[list["Order"]] = relationship(
         back_populates="restaurant",
     )
@@ -262,12 +269,9 @@ class Restaurant(Base):
 
 
 class RestaurantAvailability(Base):
-
     __tablename__ = "restaurant_availability"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4, index=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("restaurants.id", ondelete="CASCADE"),
@@ -275,36 +279,100 @@ class RestaurantAvailability(Base):
         index=True,
     )
 
-    day_of_week: Mapped[DayOfWeek] = mapped_column(
-        Enum(DayOfWeek),
+    # 0 = Monday, 6 = Sunday
+    day_of_week: Mapped[int] = mapped_column(
+        Integer,
         nullable=False,
     )
 
-    opening_time: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
+    status: Mapped[AvailabilityStatus] = mapped_column(
+        Enum(AvailabilityStatus, native_enum=False),
+        nullable=False,
     )
 
-    closing_time: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-    )
+    # Only used when status == OPEN
+    opening_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    closing_time: Mapped[time | None] = mapped_column(Time, nullable=True)
 
-    is_closed: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
+    # Supports multiple shifts (0,1,2...)
+    shift_index: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
     )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
 
-    restaurant: Mapped[Restaurant] = relationship(back_populates="availability")
+    restaurant: Mapped["Restaurant"] = relationship(back_populates="availability")
+
+    __table_args__ = (
+        # Fast lookup for availability queries
+        Index(
+            "ix_availability_restaurant_day",
+            "restaurant_id",
+            "day_of_week",
+        ),
+        # Prevent duplicate shifts per day
+        UniqueConstraint(
+            "restaurant_id",
+            "day_of_week",
+            "shift_index",
+            name="uq_restaurant_day_shift",
+        ),
+        # OPEN must have both times
+        CheckConstraint(
+            """
+            NOT (
+                status = 'OPEN'
+                AND (opening_time IS NULL OR closing_time IS NULL)
+            )
+            """,
+            name="ck_open_requires_times",
+        ),
+        # CLOSED and OPEN_24_HOURS must NOT have times
+        CheckConstraint(
+            """
+            NOT (
+                status != 'OPEN'
+                AND (opening_time IS NOT NULL OR closing_time IS NOT NULL)
+            )
+            """,
+            name="ck_non_open_times_null",
+        ),
+        # Prevent zero-length shifts
+        CheckConstraint(
+            """
+            opening_time IS NULL
+            OR closing_time IS NULL
+            OR opening_time != closing_time
+            """,
+            name="ck_no_zero_length_shift",
+        ),
+        # 24hr must be a single shift (shift_index = 0)
+        CheckConstraint(
+            """
+            NOT (
+                status = 'OPEN_24_HOURS'
+                AND shift_index != 0
+            )
+            """,
+            name="ck_24hr_single_shift",
+        ),
+        # Ensure valid day_of_week
+        CheckConstraint(
+            "day_of_week >= 0 AND day_of_week <= 6",
+            name="ck_valid_day_of_week",
+        ),
+    )
 
 
 class RestaurantImage(Base):
@@ -321,27 +389,17 @@ class RestaurantImage(Base):
         index=True,
     )
 
-    image_path: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[str] = mapped_column(Text, nullable=False)
 
     image_type: Mapped[ImageType] = mapped_column(
         Enum(ImageType), default=ImageType.GALLERY
     )
-
-    # sort_order: Mapped[int] = mapped_column(Integer, default=0)
-
-    # alt_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
-
-    # updated_at: Mapped[datetime] = mapped_column(
-    #     DateTime(timezone=True),
-    #     default=lambda: datetime.now(UTC),
-    #     onupdate=lambda: datetime.now(UTC),
-    # )
 
     restaurant: Mapped[Restaurant] = relationship(back_populates="restaurant_images")
 
@@ -351,5 +409,68 @@ class RestaurantImage(Base):
             "restaurant_id",
             unique=True,
             postgresql_where=(is_primary == True),
+            sqlite_where=(is_primary == True),
         ),
+    )
+
+
+class RestaurantClosure(Base):
+    __tablename__ = "restaurant_closures"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    starts_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+    ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    restaurant: Mapped["Restaurant"] = relationship(back_populates="closures")
+
+    __table_args__ = (Index("ix_closure_restaurant_ends", "restaurant_id", "ends_at"),)
+
+
+class CuisineType(Base):
+    __tablename__ = "cuisine_types"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    slug: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, index=True
+    )
+
+    icon_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+    restaurants: Mapped[list["Restaurant"]] = relationship(
+        back_populates="cuisine_types",
+        secondary="restaurant_cuisines",
     )
