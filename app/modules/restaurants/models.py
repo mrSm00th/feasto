@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -451,26 +452,138 @@ class RestaurantClosure(Base):
     __table_args__ = (Index("ix_closure_restaurant_ends", "restaurant_id", "ends_at"),)
 
 
+class CuisineStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"  # seeded or reviewed — shown in dropdown
+    PENDING_REVIEW = "PENDING_REVIEW"  # owner-suggested, live but flagged
+    REJECTED = "REJECTED"  # duplicate / irrelevant — hidden
+
+
 class CuisineType(Base):
     __tablename__ = "cuisine_types"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
 
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    # Display name keeping it NOT unique
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    # kept it "unique" - enforces uniqueness
     slug: Mapped[str] = mapped_column(
-        String(100), nullable=False, unique=True, index=True
+        String(100),
+        nullable=False,
+        unique=True,
     )
 
     icon_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    display_order: Mapped[int] = mapped_column(Integer, default=0)
 
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    display_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
     )
 
-    restaurants: Mapped[list["Restaurant"]] = relationship(
-        back_populates="cuisine_types",
-        secondary="restaurant_cuisines",
+    status: Mapped[CuisineStatus] = mapped_column(
+        Enum(CuisineStatus, native_enum=False),
+        default=CuisineStatus.ACTIVE,
+        nullable=False,
+    )
+
+    suggested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # for later ML integration
+    ml_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    restaurant_cuisines: Mapped[list["RestaurantCuisine"]] = relationship(
+        back_populates="cuisine_type",
+        cascade="all, delete-orphan",
+    )
+
+    suggester: Mapped["User | None"] = relationship(
+        foreign_keys=[suggested_by],
+    )
+
+    __table_args__ = (
+        Index("ix_cuisine_status_order", "status", "display_order"),
+        UniqueConstraint("slug", name="uq_cuisine_slug"),
+        CheckConstraint(
+            "ml_confidence IS NULL OR (ml_confidence >= 0.0 AND ml_confidence <= 1.0)",
+            name="ck_cuisine_ml_confidence_range",
+        ),
+    )
+
+
+class RestaurantCuisine(Base):
+    __tablename__ = "restaurant_cuisines"
+
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    cuisine_type_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cuisine_types.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
+    ml_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    restaurant: Mapped["Restaurant"] = relationship(
+        back_populates="restaurant_cuisines",
+    )
+
+    cuisine_type: Mapped["CuisineType"] = relationship(
+        back_populates="restaurant_cuisines",
+    )
+
+    __table_args__ = (
+        Index("ix_restaurant_cuisine_restaurant", "restaurant_id"),
+        Index("ix_restaurant_cuisine_type", "cuisine_type_id"),
+        UniqueConstraint(
+            "restaurant_id",
+            "cuisine_type_id",
+            name="uq_restaurant_cuisine_pair",
+        ),
+        # Only One primary cuisine per restaurant
+        Index(
+            "uq_primary_cuisine_per_restaurant",
+            "restaurant_id",
+            unique=True,
+            postgresql_where=(is_primary == True),
+            sqlite_where=(is_primary == True),
+        ),
+        # For  ML check
+        CheckConstraint(
+            "ml_confidence IS NULL OR (ml_confidence >= 0.0 AND ml_confidence <= 1.0)",
+            name="ck_restaurant_cuisine_ml_confidence_range",
+        ),
     )

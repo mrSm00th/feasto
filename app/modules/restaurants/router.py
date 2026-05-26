@@ -226,7 +226,7 @@ async def upload_restaurant_images(
 
     if len(files) > MAX_FILES_PER_REQUEST:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request.",
         )
 
@@ -248,6 +248,7 @@ async def upload_restaurant_images(
         or 0
     )
 
+    # Used when Restraunts has storage limits - for dev applying storage limits
     remaining_slots = settings.max_images_per_restaurant - existing_count
     if remaining_slots <= 0:
         raise HTTPException(
@@ -262,11 +263,14 @@ async def upload_restaurant_images(
             f"(max {settings.max_images_per_restaurant} total).",
         )
 
+    # Validate all files before uploading any of them so we never
+    # upload partial batches due to a bad file in the middle.
     processed: list[tuple[bytes, str]] = []  # (jpeg_bytes, storage_key)
 
     for file in files:
         raw = await file.read()
         try:
+            # process_image -> (jpeg_bytes, filename)
             jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
@@ -384,7 +388,9 @@ async def set_primary_restaurant_image(
     await db.commit()
 
 
+# ==================
 # Delete restaurant
+# ==================
 
 
 @router.delete("/{restaurant_id}", status_code=status.HTTP_204_NO_CONTENT)
