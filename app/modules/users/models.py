@@ -146,6 +146,17 @@ class User(Base):
         foreign_keys="[PartnerApplication.reviewed_by]",
     )
 
+    reviewed_cuisines: Mapped[list["CuisineRequest"]] = relationship(
+        back_populates="reviewer",
+        foreign_keys="[CuisineRequest.reviewed_by]",
+    )
+
+    approved_cuisines: Mapped[list["CuisineType"]] = relationship(
+        back_populates="approver",
+        # cascade="all, delete-orphan",
+        foreign_keys="[CuisineType.approved_by]",
+    )
+
 
 class Address(Base):
     __tablename__ = "addresses"

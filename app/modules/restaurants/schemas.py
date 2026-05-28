@@ -232,3 +232,15 @@ class ClosureResponse(BaseSchema):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CuisineResponse(BaseSchema):
+
+    id: uuid.UUID
+    cuisine_name: str
+    cuisine_slug: str
+
+
+class CreateCuisine(BaseSchema):
+
+    cuisine_name: str

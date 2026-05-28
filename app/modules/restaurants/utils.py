@@ -144,6 +144,7 @@ Image processing lives here; storage I/O lives in storage.py.
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
 from io import BytesIO
 from math import asin, cos, radians, sin, sqrt
@@ -345,3 +346,50 @@ def _build_availability_rows(
         }
         for entry in shifts
     ]
+
+
+# =====================
+# noramize cuisine name
+# =====================
+
+
+def normalize_cuisine_name(name: str) -> str:
+    if not name or not name.strip():
+        raise ValueError("Cuisine name cannot be empty")
+
+    # normalize the cuisine name
+    name = unicodedata.normalize("NFKD", name)
+    name = name.encode("ascii", "ignore").decode("ascii")
+
+    name = name.lower()
+
+    # Standardizing the  connectors
+    name = re.sub(r"\s*(&|\+|/)\s*", " and ", name)
+
+    # Replacing the separators
+    name = re.sub(r"[-_]+", " ", name)
+
+    # Remove special chars
+    name = re.sub(r"[^a-z0-9 ]+", "", name)
+
+    # Collapse spaces
+    name = re.sub(r"\s+", " ", name).strip()
+
+    return name.title()
+
+
+def slugify(value: str) -> str:
+
+    # Normalize unicode characters (é -> e)
+    value = unicodedata.normalize("NFKD", value)
+    value = value.encode("ascii", "ignore").decode("ascii")
+
+    value = value.lower()
+
+    # Replacing all  non-alphanumeric chars with hyphen
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+
+    # Removing any  leading/trailing hyphens
+    value = value.strip("-")
+
+    return value

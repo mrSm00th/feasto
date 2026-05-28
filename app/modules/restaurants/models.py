@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import enum
 import uuid
 from datetime import UTC, datetime, time
@@ -263,6 +265,18 @@ class Restaurant(Base):
         cascade="all, delete-orphan",
     )
 
+    # Temporary closure events (maintenance, holidays, emergencies)
+    closures: Mapped[list["RestaurantClosure"]] = relationship(
+        back_populates="restaurant",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+
+    restaurant_cuisines: Mapped[list["RestaurantCuisineMapping"]] = relationship(
+        back_populates="restaurant",
+        cascade="all, delete-orphan",
+    )
+
     __table_args__ = (
         UniqueConstraint(
             owner_id, normalized_name, normalized_address_line_1, normalized_city
@@ -455,233 +469,203 @@ class RestaurantClosure(Base):
 
 class CuisineStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
-    PENDING_REVIEW = "PENDING_REVIEW"
-    REJECTED = "REJECTED"
+
     ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
 
 
 class CuisineType(Base):
+
     __tablename__ = "cuisine_types"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key=True,
+        nullable=False,
+        index=True,
         default=uuid.uuid4,
     )
 
-    # NOT UNIQUE intentionally:
-    # uniqueness is enforced via normalized slug
-    name: Mapped[str] = mapped_column(
+    cuisine_name: Mapped[str] = mapped_column(
         String(120),
+        index=True,
         nullable=False,
     )
 
-    # normalize this in the service layer
-    # "North Indian" -> "north-indian"
-    slug: Mapped[str] = mapped_column(
-        String(140),
+    cuisine_slug: Mapped[str] = mapped_column(
+        String(120),
         nullable=False,
         unique=True,
     )
 
-    # Optional (CDN / storage URL)
-    icon_url: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
+    status: Mapped[CuisineStatus] = mapped_column(
+        Enum(CuisineStatus),
+        default=CuisineStatus.PENDING_REVIEW,
     )
 
-    # used for cuisine display order
-    display_order: Mapped[int] = mapped_column(
+    use_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        default=0,
-        server_default="0",
     )
-
-    status: Mapped[CuisineStatus] = mapped_column(
-        Enum(
-            CuisineStatus,
-            native_enum=False,
-            validate_strings=True,
-        ),
-        nullable=False,
-        default=CuisineStatus.ACTIVE,
-        server_default=CuisineStatus.ACTIVE.value,
-    )
-
-    # User who suggested cuisine
-    suggested_by: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey(
-            "users.id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-    )
-
-    # Reserved for future ML-assisted moderation/recommendation
-    # Keep nullable for backward compatibility
-    ml_confidence: Mapped[float | None] = mapped_column(
-        Float,
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
         nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        nullable=False,
         default=lambda: datetime.now(UTC),
-        server_default=text("CURRENT_TIMESTAMP"),
     )
 
-    updated_at: Mapped[datetime] = mapped_column(
+    approved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-        server_default=text("CURRENT_TIMESTAMP"),
+        nullable=True,
     )
 
-    # =============
-    # RELATIONSHIPS
-    # =============
-
-    restaurant_cuisines: Mapped[list["RestaurantCuisine"]] = relationship(
-        back_populates="cuisine_type",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
     )
 
-    suggester: Mapped["User | None"] = relationship(
-        foreign_keys=[suggested_by],
+    # relationships
+
+    restaurant_cuisines: Mapped[list[RestaurantCuisineMapping]] = relationship(
+        back_populates="cuisine",
     )
 
-    __table_args__ = (
-        # Fast filtering for public listing/admin moderation
-        Index(
-            "ix_cuisine_status_display_order",
-            "status",
-            "display_order",
-        ),
-        # Search/autocomplete optimization
-        Index(
-            "ix_cuisine_name",
-            "name",
-        ),
-        # Stable uniqueness guarantee
-        UniqueConstraint(
-            "slug",
-            name="uq_cuisine_slug",
-        ),
-        # ML score validation
-        CheckConstraint(
-            """
-            ml_confidence IS NULL
-            OR (
-                ml_confidence >= 0.0
-                AND ml_confidence <= 1.0
-            )
-            """,
-            name="ck_cuisine_ml_confidence_range",
-        ),
+    approver: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[approved_by],
+        back_populates="approved_cuisines",
     )
 
 
-# ==============================
-# RESTAURANT <-> CUISINE MAPPING
-# Many-to-many junction table
-# ==============================
+class MappedCuisineStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
 
 
-class RestaurantCuisine(Base):
+class RestaurantCuisineMapping(Base):
+
     __tablename__ = "restaurant_cuisines"
 
-    restaurant_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey(
-            "restaurants.id",
-            ondelete="CASCADE",
-        ),
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
         primary_key=True,
-    )
-
-    cuisine_type_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey(
-            "cuisine_types.id",
-            ondelete="CASCADE",
-        ),
-        primary_key=True,
-    )
-
-    # Example:
-    # Restaurant:
-    #   cuisines = ["Italian", "Pizza", "Mediterranean"]
-    #
-    # Primary:
-    #   Italian
-    is_primary: Mapped[bool] = mapped_column(
-        Boolean,
         nullable=False,
-        default=False,
-        server_default=text("false"),
+        index=True,
+        default=uuid.uuid4,
     )
 
-    # Reserved for future ML classification
-    ml_confidence: Mapped[float | None] = mapped_column(
-        Float,
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    cuisine_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cuisine_types.id"),
         nullable=True,
+    )
+
+    # remove when the cuisine is approved
+    request_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cuisine_requests.id"),
+        nullable=True,
+    )
+
+    cuisine_name: Mapped[str] = mapped_column(
+        String(120),
+        index=True,
+        nullable=False,
+    )
+
+    cuisine_slug: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+    )
+
+    status: Mapped[MappedCuisineStatus] = mapped_column(
+        Enum(MappedCuisineStatus),
+        default=MappedCuisineStatus.PENDING_REVIEW,
     )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        nullable=False,
         default=lambda: datetime.now(UTC),
-        server_default=text("CURRENT_TIMESTAMP"),
     )
 
-    # ==============
-    # RELATIONSHIPS
-    # ==============
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
 
+    # relationship
     restaurant: Mapped["Restaurant"] = relationship(
         back_populates="restaurant_cuisines",
     )
-
-    cuisine_type: Mapped["CuisineType"] = relationship(
+    cuisine: Mapped[CuisineType] = relationship(
         back_populates="restaurant_cuisines",
     )
 
     __table_args__ = (
-        # Fast restaurant -> cuisines lookup
-        Index(
-            "ix_restaurant_cuisine_restaurant_id",
-            "restaurant_id",
-        ),
-        # Fast cuisine -> restaurants lookup
-        Index(
-            "ix_restaurant_cuisine_cuisine_type_id",
-            "cuisine_type_id",
-        ),
-        # Explicit uniqueness
-        UniqueConstraint(
-            "restaurant_id",
-            "cuisine_type_id",
-            name="uq_restaurant_cuisine_pair",
-        ),
-        # Only ONE primary cuisine per restaurant
-        Index(
-            "uq_primary_cuisine_per_restaurant",
-            "restaurant_id",
-            unique=True,
-            postgresql_where=text("is_primary = true"),
-            sqlite_where=text("is_primary = 1"),
-        ),
-        # ML confidence validation
+        # exactly one must exist:
+        # either pending(request_id)
+        # or approved(cuisine_id)
         CheckConstraint(
             """
-            ml_confidence IS NULL
-            OR (
-                ml_confidence >= 0.0
-                AND ml_confidence <= 1.0
+            (
+                (cuisine_id IS NOT NULL AND request_id IS NULL)
+                OR
+                (cuisine_id IS NULL AND request_id IS NOT NULL)
             )
             """,
-            name="ck_restaurant_cuisine_ml_confidence_range",
+            name="check_cuisine_or_request_only",
         ),
+        # prevent duplicate approved cuisines
+        UniqueConstraint(
+            "restaurant_id",
+            "cuisine_id",
+            name="uq_restaurant_cuisine",
+        ),
+        # prevents duplicate pending cuisine requests
+        UniqueConstraint(
+            "restaurant_id",
+            "request_id",
+            name="uq_restaurant_request",
+        ),
+    )
+
+
+# NOTE - only pending requests live here
+class CuisineRequest(Base):
+
+    __tablename__ = "cuisine_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        nullable=False,
+        index=True,
+        default=uuid.uuid4,
+    )
+
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
+    cuisine_name: Mapped[str] = mapped_column(
+        String(120),
+        index=True,
+        nullable=False,
+        unique=True,
+    )
+
+    cuisine_slug: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+        unique=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
     )

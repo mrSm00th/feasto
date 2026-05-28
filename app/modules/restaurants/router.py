@@ -16,15 +16,21 @@ from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.restaurants.models import (
+    CuisineStatus,
+    CuisineType,
     Restaurant,
     RestaurantAvailability,
     RestaurantClosure,
+    RestaurantCuisineMapping,
     RestaurantImage,
     RestaurantStatus,
+    CuisineRequest,
 )
 from app.modules.restaurants.schemas import (
     ClosureCreate,
     ClosureResponse,
+    CreateCuisine,
+    CuisineResponse,
     DayHoursResponse,
     DayHoursUpdate,
     RestaurantCreate,
@@ -37,12 +43,18 @@ from app.modules.restaurants.schemas import (
 )
 from app.modules.restaurants.storage import StorageBackend, get_storage
 from app.modules.restaurants.utils import (
+    generate_unique_slug,
+)  # generates unique slug for restaurant
+from app.modules.restaurants.utils import (
+    slugify,
+)  # generates unique slugs for cuisine name
+from app.modules.restaurants.utils import (
     ImageProcessingError,
     _build_availability_rows,
     _get_owned_restaurant,
     _get_upsert_fn,
-    generate_unique_slug,
     normalize,
+    normalize_cuisine_name,
     process_image,
 )
 from app.modules.users.models import User, UserRole
@@ -741,3 +753,135 @@ async def delete_closure(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to remove closure.",
         ) from exc
+
+
+@router.post(
+    "/{restaurant_id}/cuisines",
+    response_model=CuisineResponse,
+)
+async def create_new_cuisine(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[
+        User,
+        Depends(
+            require_roles(
+                UserRole.RESTAURANT_OWNER,
+            )
+        ),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    data: CreateCuisine,
+):
+
+    restaurant = await db.scalar(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not restaurant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    name = data.cuisine_name
+    normalized_name = normalize_cuisine_name(name)
+    slug = slugify(normalized_name)
+
+    # allowing multiple requests for same pending cuisines
+    result = await db.execute(
+        select(CuisineType).where(
+            CuisineType.cuisine_slug == slug, CuisineType.status == CuisineStatus.ACTIVE
+        )
+    )
+
+    exisiting_cuisine = result.scalars().first()
+
+    if exisiting_cuisine:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cuisine name already exists {exisiting_cuisine.cuisine_slug}",
+        )
+
+    pending_result = await db.execute(
+        select(CuisineRequest).where(CuisineRequest.cuisine_slug == slug)
+    )
+
+    pending_cuisine = pending_result.scalars().first()
+
+    if not pending_cuisine:
+
+        new_request = CuisineRequest(
+            requested_by=current_user.id,
+            cuisine_name=normalized_name,
+            cuisine_slug=slug,
+        )
+
+        try:
+            db.add(new_request)
+            await db.commit()
+
+        except IntegrityError as exe:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Something went wrong, Please check if the cuisine already exists",
+            )
+        await db.refresh(new_request)
+
+    new_cuisine_mappping = RestaurantCuisineMapping(
+        restaurant_id=restaurant_id,
+        request_id=new_request.id if not pending_cuisine else pending_cuisine.id,
+        cuisine_name=normalized_name,
+        cuisine_slug=slug,
+        status=CuisineStatus.PENDING_REVIEW,  # new-request.status
+    )
+
+    try:
+        db.add(new_cuisine_mappping)
+        await db.commit()
+
+    except IntegrityError as exe:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Something went wrong, Please check if the cuisine already exists",
+        )
+    await db.refresh(new_cuisine_mappping)
+
+    return new_cuisine_mappping
+
+
+@router.get(
+    "/cuisines",
+    response_model=list[CuisineResponse],
+)
+async def get_top_cuisine_types(
+    current_user: Annotated[
+        User,
+        Depends(
+            require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER, UserRole.ADMIN)
+        ),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    result = await db.execute(
+        select(CuisineType)
+        .where(CuisineType.status == CuisineStatus.ACTIVE)
+        .order_by(CuisineType.use_count.desc())
+        .limit(5)
+    )
+
+    cuisines = result.scalars().all()
+
+    if not cuisines:
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="There's a problem while fetching cuisines",
+        )
+
+    return cuisines
