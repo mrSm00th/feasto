@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,14 +14,24 @@ from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.admin.schemas import (
+    ApprovedCuisineResponse,
     PaginatedApplicationResponse,
+    PaginatedPendingCuisineResponse,
     PartnerApplicationAdminReview,
     PartnerApplicationDetailed,
     PendingApplicationsList,
+    PendingCuisineRequest,
 )
 from app.modules.partner_applications.models import (
     ApplicationStatus,
     PartnerApplication,
+)
+from app.modules.restaurants.models import (
+    CuisineRequest,
+    CuisineStatus,
+    CuisineType,
+    MappedCuisineStatus,
+    RestaurantCuisineMapping,
 )
 from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
@@ -204,3 +215,129 @@ async def review_owner_application(
     await db.refresh(application)
 
     return application
+
+
+@router.get(
+    "/cuisines/pending",
+    response_model=PaginatedPendingCuisineResponse,
+)
+async def paginated_pending_cuisine_requests(
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: AsyncSession = Depends(get_db),
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page,
+):
+
+    result_count = await db.execute(
+        select(func.count()).select_from(CuisineRequest),
+    )
+
+    total = result_count.scalar() or 0
+
+    result = await db.execute(
+        select(CuisineRequest)
+        .order_by(CuisineRequest.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    pending_cuisines = result.scalars().all()
+
+    has_more = skip + len(pending_cuisines) < total
+
+    return PaginatedPendingCuisineResponse(
+        cuisines=[
+            PendingCuisineRequest.model_validate(pending_cuisine)
+            for pending_cuisine in pending_cuisines
+        ],
+        total=total,
+        skip=skip,
+        limit=limit,
+        has_more=has_more,
+    )
+
+
+@router.post(
+    "/cuisines/{id}/approve",
+    response_model=ApprovedCuisineResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def approve_pending_cuisine(
+    id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    result = await db.execute(select(CuisineRequest).where(CuisineRequest.id == id))
+
+    pending_cuisine = result.scalars().first()
+
+    if not pending_cuisine:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cuisine request not found.",
+        )
+
+    # server-side safety check
+    existing_cuisine = await db.scalar(
+        select(CuisineType).where(
+            CuisineType.cuisine_slug == pending_cuisine.cuisine_slug
+        )
+    )
+
+    if existing_cuisine:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(f"Cuisine '{existing_cuisine.cuisine_name}' " "already exists."),
+        )
+
+    try:
+
+        new_cuisine = CuisineType(
+            cuisine_name=pending_cuisine.cuisine_name,
+            cuisine_slug=pending_cuisine.cuisine_slug,
+            approved_by=current_user.id,
+            approved_at=datetime.now(UTC),
+            status=CuisineStatus.ACTIVE,
+        )
+
+        db.add(new_cuisine)
+
+        # generate PK without committing transaction
+        await db.flush()
+
+        await db.execute(
+            update(RestaurantCuisineMapping)
+            .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
+            .values(
+                cuisine_id=new_cuisine.id,
+                request_id=None,
+                status=MappedCuisineStatus.ACTIVE,
+            )
+        )
+
+        await db.delete(pending_cuisine)
+
+        # ONE atomic commit
+
+        await db.commit()
+
+        await db.refresh(new_cuisine)
+
+    except IntegrityError:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cuisine approval failed due to a data conflict.",
+        )
+
+    except Exception:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to approve cuisine request.",
+        )
+
+    return new_cuisine

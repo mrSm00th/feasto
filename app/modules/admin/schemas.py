@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.partner_applications.models import ApplicationStatus
+from app.modules.restaurants.models import CuisineStatus
 from app.modules.users.schemas import UserPublic
 
 
@@ -49,3 +50,29 @@ class PartnerApplicationAdminReview(
     rejection_reason: Annotated[str | None, Field(max_length=500)] = None
     reviewed_by: uuid.UUID
     reviewed_at: datetime
+
+
+class PendingCuisineRequest(BaseSchema):
+
+    id: uuid.UUID
+    requested_by: uuid.UUID
+    cuisine_name: str
+    cuisine_slug: str
+    created_at: datetime
+
+
+class PaginatedPendingCuisineResponse(BaseSchema):
+    cuisines: list[PendingCuisineRequest]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
+
+
+class ApprovedCuisineResponse(BaseSchema):
+
+    id: uuid.UUID
+    cuisine_name: str
+    cuisine_slug: str
+    status: CuisineStatus
+    approved_by: uuid.UUID
