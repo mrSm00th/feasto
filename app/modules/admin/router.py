@@ -28,12 +28,14 @@ from app.modules.partner_applications.models import (
 )
 from app.modules.restaurants.models import (
     CuisineRequest,
+    CuisineRequestHistory,
     CuisineStatus,
     CuisineType,
     MappedCuisineStatus,
+    Restaurant,
     RestaurantCuisineMapping,
 )
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import Notification, User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
 
 router = APIRouter(prefix="/api/admin", tags=["admins"])
@@ -273,26 +275,30 @@ async def approve_pending_cuisine(
     pending_cuisine = result.scalars().first()
 
     if not pending_cuisine:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Cuisine request not found.",
+            detail="Cuisine request not found",
         )
 
-    # server-side safety check
-    existing_cuisine = await db.scalar(
+    # server side safety check for existing cuisine
+
+    result = await db.execute(
         select(CuisineType).where(
             CuisineType.cuisine_slug == pending_cuisine.cuisine_slug
         )
     )
 
+    existing_cuisine = result.scalars().first()
+
     if existing_cuisine:
+
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(f"Cuisine '{existing_cuisine.cuisine_name}' " "already exists."),
         )
 
     try:
-
         new_cuisine = CuisineType(
             cuisine_name=pending_cuisine.cuisine_name,
             cuisine_slug=pending_cuisine.cuisine_slug,
@@ -302,8 +308,6 @@ async def approve_pending_cuisine(
         )
 
         db.add(new_cuisine)
-
-        # generate PK without committing transaction
         await db.flush()
 
         await db.execute(
@@ -313,20 +317,15 @@ async def approve_pending_cuisine(
                 cuisine_id=new_cuisine.id,
                 request_id=None,
                 status=MappedCuisineStatus.ACTIVE,
-            )
+            ),
         )
 
         await db.delete(pending_cuisine)
 
-        # ONE atomic commit
-
         await db.commit()
 
-        await db.refresh(new_cuisine)
-
-    except IntegrityError:
+    except IntegrityError as exe:
         await db.rollback()
-
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cuisine approval failed due to a data conflict.",
@@ -334,10 +333,104 @@ async def approve_pending_cuisine(
 
     except Exception:
         await db.rollback()
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to approve cuisine request.",
         )
 
+    await db.refresh(new_cuisine)
+
     return new_cuisine
+
+
+@router.post(
+    "/cuisines/{id}/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reject_pending_cuisine(
+    id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    rejection_reason: Annotated[str, Field(min_length=1, max_length=500)],
+):
+
+    result = await db.execute(select(CuisineRequest).where(CuisineRequest.id == id))
+
+    pending_cuisine = result.scalars().first()
+
+    if not pending_cuisine:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cuisine request not found",
+        )
+
+    new_history = CuisineRequestHistory(
+        requested_by=pending_cuisine.requested_by,
+        cuisine_name=pending_cuisine.cuisine_name,
+        cuisine_slug=pending_cuisine.cuisine_slug,
+        rejected_by=current_user.id,
+        rejection_reason=rejection_reason,
+        created_at=pending_cuisine.created_at,
+        rejected_at=datetime.now(UTC),
+    )
+
+    db.add(new_history)
+    await db.flush()
+
+    result = await db.execute(
+        select(User.id)
+        .distinct()
+        .join(Restaurant, Restaurant.owner_id == User.id)
+        .join(
+            RestaurantCuisineMapping,
+            RestaurantCuisineMapping.restaurant_id == Restaurant.id,
+        )
+        .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
+    )
+
+    owner_ids = result.scalars().all()
+
+    notifications = [
+        Notification(
+            user_id=owner_id,
+            type=NotificationType.CUISINE_REJECTED,
+            reference_id=new_history.id,
+            title="Cuisine Request Rejected",
+            content=(
+                f"The cuisine '{pending_cuisine.cuisine_name}' "
+                f"was rejected by an administrator."
+            ),
+        )
+        for owner_id in owner_ids
+    ]
+
+    db.add_all(notifications)
+
+    await db.execute(
+        update(RestaurantCuisineMapping)
+        .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
+        .values(
+            request_id=None,
+            status=MappedCuisineStatus.REJECTED,
+        )
+    )
+
+    try:
+
+        await db.delete(pending_cuisine)
+        await db.commit()
+
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cuisine rejection failed due to a data conflict.",
+        )
+
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reject cuisine request.",
+        )

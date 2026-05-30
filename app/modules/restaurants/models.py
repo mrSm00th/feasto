@@ -466,10 +466,9 @@ class RestaurantClosure(Base):
 
     __table_args__ = (Index("ix_closure_restaurant_ends", "restaurant_id", "ends_at"),)
 
-
+# Only used for CuisineType
 class CuisineStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
-
     ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
 
 
@@ -483,6 +482,12 @@ class CuisineType(Base):
         nullable=False,
         index=True,
         default=uuid.uuid4,
+    )
+
+    #NOTE: If None then cuisine directly seeded by admin
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
     )
 
     cuisine_name: Mapped[str] = mapped_column(
@@ -499,13 +504,9 @@ class CuisineType(Base):
 
     status: Mapped[CuisineStatus] = mapped_column(
         Enum(CuisineStatus),
-        default=CuisineStatus.PENDING_REVIEW,
+        default=CuisineStatus.ACTIVE,
     )
 
-    use_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-    )
     approved_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"),
         nullable=True,
@@ -531,6 +532,11 @@ class CuisineType(Base):
         back_populates="cuisine",
     )
 
+    requester: Mapped["User"] = relationship(
+        foreign_keys=[requested_by],
+        back_populates="approved_created_cuisines",
+    )
+
     approver: Mapped["User"] = relationship(
         "User",
         foreign_keys=[approved_by],
@@ -538,10 +544,12 @@ class CuisineType(Base):
     )
 
 
+# Used for the Mapping model
 class MappedCuisineStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     PENDING_REVIEW = "PENDING_REVIEW"
     ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
+    REJECTED = "REJECTED"
 
 
 class RestaurantCuisineMapping(Base):
@@ -647,7 +655,7 @@ class CuisineRequest(Base):
         default=uuid.uuid4,
     )
 
-    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+    requested_by: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id"),
         nullable=False,
     )
@@ -668,4 +676,74 @@ class CuisineRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+    requester: Mapped["User"] = relationship(
+        foreign_keys=[requested_by],
+        back_populates="pending_created_cuisines",
+    )
+
+
+class CuisineRequestHistory(Base):
+
+    __tablename__ = "cuisine_request_history"
+
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        nullable=False,
+        index=True,
+        default=uuid.uuid4,
+    )
+
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
+    cuisine_name: Mapped[str] = mapped_column(
+        String(120),
+        index=True,
+        nullable=False,
+    )
+
+    cuisine_slug: Mapped[str] = mapped_column(
+        String(120),
+        nullable=False,
+    )
+
+    #timestamp when request was created originally
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+    )
+
+    # timestamp when request was rejected
+    rejected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    rejected_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
+    rejection_reason: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+    
+    rejector: Mapped["User"] = relationship(
+        foreign_keys=[rejected_by],
+        back_populates="rejected_cuisines",
+    )
+
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="reference",
+    )
+
+    requester: Mapped["User"] = relationship(
+        foreign_keys=[requested_by],
+        back_populates="rejected_created_cuisines",
     )
