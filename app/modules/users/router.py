@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -237,7 +237,7 @@ async def get_user_notifications(
 
 
 @router.get(
-    "/{notification_id}/notifications",
+    "/notifications/{notification_id}",
     response_model=NotificationDetailResponse,
 )
 async def get_notification_by_id(
@@ -281,3 +281,79 @@ async def get_notification_by_id(
     )
 
     return return_object
+
+
+@router.patch(
+    "/notifications/{notification_id}/read",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def mark_notification_as_read(
+    notification_id: uuid.UUID,
+    current_user: Annotated[
+        User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    result = await db.execute(
+        select(Notification).where(
+            Notification.id == notification_id,
+            Notification.user_id == current_user.id,
+        )
+    )
+
+    notification = result.scalars().first()
+
+    if not notification:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found",
+        )
+
+    notification.is_read = True
+    notification.read_at = datetime.now(UTC)
+
+    try:
+        await db.commit()
+
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to mark notification as read",
+        )
+
+
+@router.patch(
+    "/notifications/read-all",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def mark_all_notification_as_read(
+    current_user: Annotated[
+        User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    await db.execute(
+        update(Notification)
+        .where(
+            Notification.user_id == current_user.id,
+            Notification.is_read == False,
+        )
+        .values(
+            is_read=True,
+            read_at=datetime.now(UTC),
+        )
+    )
+
+    try:
+        await db.commit()
+
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to mark all notification as read",
+        )
