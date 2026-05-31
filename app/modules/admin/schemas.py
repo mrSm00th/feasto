@@ -76,3 +76,8 @@ class ApprovedCuisineResponse(BaseSchema):
     cuisine_slug: str
     status: CuisineStatus
     approved_by: uuid.UUID
+
+
+class RejectionReason(BaseSchema):
+
+    rejection_reason: Annotated[str, Field(min_length=10, max_length=500)]

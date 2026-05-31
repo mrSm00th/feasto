@@ -1,10 +1,12 @@
 import enum
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.modules.users.models import UserStatus
+from app.modules.restaurants.models import CuisineRequestHistory, RestaurantStatus
+from app.modules.users.models import NotificationType, UserStatus
 
 
 class BaseSchema(BaseModel):
@@ -51,11 +53,42 @@ class RestaurantList(BaseSchema):
     address_line_1: str
     city: str
     state: str
+    status: RestaurantStatus
 
 
 class PaginatedOwnerRestaurant(BaseSchema):
 
     restaurants: list[RestaurantList]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
+
+
+class NotificationResponse(BaseSchema):
+
+    id: uuid.UUID
+    type: NotificationType
+    title: str
+    # content: str sendng in detailed response
+    is_read: bool
+    created_at: datetime
+
+
+class CuisineRequestHistroryResponse(BaseSchema):
+
+    id: uuid.UUID
+    cuisine_name: str
+
+
+class NotificationDetailResponse(NotificationResponse):
+
+    content: str
+    reference: CuisineRequestHistroryResponse
+
+
+class PaginatedNotifications(BaseSchema):
+    notifications: list[NotificationResponse]
     total: int
     skip: int
     limit: int

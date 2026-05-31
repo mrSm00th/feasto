@@ -1,9 +1,11 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,8 +20,12 @@ from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.restaurants.models import Restaurant
-from app.modules.users.models import User, UserRole
+from app.modules.users.models import Notification, User, UserRole
 from app.modules.users.schemas import (
+    CuisineRequestHistroryResponse,
+    NotificationDetailResponse,
+    NotificationResponse,
+    PaginatedNotifications,
     PaginatedOwnerRestaurant,
     RestaurantList,
     Token,
@@ -129,6 +135,7 @@ async def get_current_user(current_user: CurrentUser):
 
 @router.get(
     "/me/restaurants",
+    response_model=PaginatedOwnerRestaurant,
 )
 async def get_current_user_restaurants(
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
@@ -166,3 +173,111 @@ async def get_current_user_restaurants(
         limit=limit,
         has_more=has_more,
     )
+
+
+@router.get(
+    "/notifications",
+    response_model=PaginatedNotifications,
+)
+async def get_user_notifications(
+    current_user: Annotated[
+        User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.notifications_per_page,
+):
+
+    result = await db.execute(select(User).where(User.id == current_user.id))
+
+    existing_user = result.scalars().first()
+
+    if not existing_user:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    result_count = await db.execute(
+        select(func.count())
+        .select_from(Notification)
+        .where(
+            Notification.user_id == current_user.id,
+        )
+    )
+
+    total = result_count.scalar() or 0
+
+    result = await db.execute(
+        select(Notification)
+        .where(Notification.user_id == current_user.id)
+        .order_by(
+            Notification.is_read.asc(),
+            Notification.created_at.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+    )
+
+    notifications = result.scalars().all()
+
+    has_more = skip + len(notifications) < total
+
+    return PaginatedNotifications(
+        notifications=[
+            NotificationResponse.model_validate(notification)
+            for notification in notifications
+        ],
+        total=total,
+        skip=skip,
+        limit=limit,
+        has_more=has_more,
+    )
+
+
+@router.get(
+    "/{notification_id}/notifications",
+    response_model=NotificationDetailResponse,
+)
+async def get_notification_by_id(
+    notification_id: uuid.UUID,
+    current_user: Annotated[
+        User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    result = await db.execute(
+        select(Notification)
+        .options(selectinload(Notification.reference))
+        .where(
+            Notification.id == notification_id,
+            Notification.user_id == current_user.id,
+        )
+    )
+
+    notification = result.scalars().first()
+
+    if not notification:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found",
+        )
+
+    return_object = NotificationDetailResponse(
+        id=notification.id,
+        type=notification.type,
+        title=notification.title,
+        content=notification.content,
+        is_read=notification.is_read,
+        read_at=notification.read_at,
+        created_at=notification.created_at,
+        reference=CuisineRequestHistroryResponse(
+            id=notification.reference.id,
+            cuisine_name=notification.reference.cuisine_name,
+        ),
+    )
+
+    return return_object

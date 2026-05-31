@@ -21,6 +21,7 @@ from app.modules.admin.schemas import (
     PartnerApplicationDetailed,
     PendingApplicationsList,
     PendingCuisineRequest,
+    RejectionReason,
 )
 from app.modules.partner_applications.models import (
     ApplicationStatus,
@@ -35,7 +36,7 @@ from app.modules.restaurants.models import (
     Restaurant,
     RestaurantCuisineMapping,
 )
-from app.modules.users.models import Notification, User, UserRole
+from app.modules.users.models import Notification, NotificationType, User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
 
 router = APIRouter(prefix="/api/admin", tags=["admins"])
@@ -351,7 +352,7 @@ async def reject_pending_cuisine(
     id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    rejection_reason: Annotated[str, Field(min_length=1, max_length=500)],
+    data: RejectionReason,
 ):
 
     result = await db.execute(select(CuisineRequest).where(CuisineRequest.id == id))
@@ -366,11 +367,12 @@ async def reject_pending_cuisine(
         )
 
     new_history = CuisineRequestHistory(
+        request_id=pending_cuisine.id,
         requested_by=pending_cuisine.requested_by,
         cuisine_name=pending_cuisine.cuisine_name,
         cuisine_slug=pending_cuisine.cuisine_slug,
         rejected_by=current_user.id,
-        rejection_reason=rejection_reason,
+        rejection_reason=data.rejection_reason,
         created_at=pending_cuisine.created_at,
         rejected_at=datetime.now(UTC),
     )
@@ -411,7 +413,6 @@ async def reject_pending_cuisine(
         update(RestaurantCuisineMapping)
         .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
         .values(
-            request_id=None,
             status=MappedCuisineStatus.REJECTED,
         )
     )
