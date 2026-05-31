@@ -16,15 +16,16 @@ from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.restaurants.models import (
+    CuisineRequest,
     CuisineStatus,
     CuisineType,
+    MappedCuisineStatus,
     Restaurant,
     RestaurantAvailability,
     RestaurantClosure,
     RestaurantCuisineMapping,
     RestaurantImage,
     RestaurantStatus,
-    CuisineRequest,
 )
 from app.modules.restaurants.schemas import (
     ClosureCreate,
@@ -42,20 +43,16 @@ from app.modules.restaurants.schemas import (
     RestaurantImageUploadResponse,
 )
 from app.modules.restaurants.storage import StorageBackend, get_storage
-from app.modules.restaurants.utils import (
-    generate_unique_slug,
-)  # generates unique slug for restaurant
-from app.modules.restaurants.utils import (
-    slugify,
-)  # generates unique slugs for cuisine name
-from app.modules.restaurants.utils import (
+from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
     ImageProcessingError,
     _build_availability_rows,
     _get_owned_restaurant,
     _get_upsert_fn,
+    generate_unique_slug,
     normalize,
     normalize_cuisine_name,
     process_image,
+    slugify,
 )
 from app.modules.users.models import User, UserRole
 
@@ -325,8 +322,7 @@ async def upload_restaurant_images(
         logger.exception("DB commit failed for restaurant %s images", restaurant_id)
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            # detail="Failed to save image records. Uploaded files have been removed.",
-            detail=str(exc),
+            detail="Failed to save image records. Uploaded files have been removed.",
         ) from exc
 
     for img in db_images:
@@ -499,6 +495,7 @@ async def create_restaurant_hours(
 # Onboarding step — set the full weekly schedule
 
 
+# NOTE Evaluate for after mid night closing time
 @router.post(
     "/{restaurant_id}/hours",
     response_model=RestaurantHoursResponse,
@@ -789,7 +786,6 @@ async def create_new_cuisine(
     normalized_name = normalize_cuisine_name(name)
     slug = slugify(normalized_name)
 
-    # allowing multiple requests for same pending cuisines
     result = await db.execute(
         select(CuisineType).where(
             CuisineType.cuisine_slug == slug, CuisineType.status == CuisineStatus.ACTIVE
@@ -809,6 +805,8 @@ async def create_new_cuisine(
         select(CuisineRequest).where(CuisineRequest.cuisine_slug == slug)
     )
 
+    # allowing multiple requests for same pending cuisines,
+    # but creating only one request in the CuisineRequest
     pending_cuisine = pending_result.scalars().first()
 
     if not pending_cuisine:
@@ -826,7 +824,7 @@ async def create_new_cuisine(
         except IntegrityError as exe:
             await db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_409_CONFLICT,
                 detail="Something went wrong, Please check if the cuisine already exists",
             )
         await db.refresh(new_request)
@@ -834,9 +832,9 @@ async def create_new_cuisine(
     new_cuisine_mappping = RestaurantCuisineMapping(
         restaurant_id=restaurant_id,
         request_id=new_request.id if not pending_cuisine else pending_cuisine.id,
-        cuisine_name=normalized_name,
-        cuisine_slug=slug,
-        status=CuisineStatus.PENDING_REVIEW,  # new-request.status
+        # cuisine_name=normalized_name,
+        # cuisine_slug=slug,
+        status=MappedCuisineStatus.PENDING_REVIEW,  # new-request.status
     )
 
     try:
@@ -846,14 +844,15 @@ async def create_new_cuisine(
     except IntegrityError as exe:
         await db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Something went wrong, Please check if the cuisine already exists",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Restaurant already requested same pending cuisine",
         )
-    await db.refresh(new_cuisine_mappping)
+    await db.refresh(new_request)
 
-    return new_cuisine_mappping
+    return new_request
 
 
+# NOTE- evaluate this route and remove 500
 @router.get(
     "/cuisines",
     response_model=list[CuisineResponse],

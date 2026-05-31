@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -311,6 +311,35 @@ async def approve_pending_cuisine(
         db.add(new_cuisine)
         await db.flush()
 
+        results = await db.execute(
+            select(User.id)
+            .distinct()
+            .join(Restaurant, Restaurant.owner_id == User.id)
+            .join(
+                RestaurantCuisineMapping,
+                RestaurantCuisineMapping.restaurant_id == Restaurant.id,
+            )
+            .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
+        )
+
+        owner_ids = results.scalars().all()
+
+        notifications = [
+            Notification(
+                user_id=owner_id,
+                type=NotificationType.CUISINE_ACCEPTED,
+                reference_id=new_cuisine.id,
+                title="Cuisine Request Accepted",
+                content=(
+                    f"The cuisine '{pending_cuisine.cuisine_name}' "
+                    f"was Accepted by an administrator."
+                ),
+            )
+            for owner_id in owner_ids
+        ]
+
+        db.add_all(notifications)
+
         await db.execute(
             update(RestaurantCuisineMapping)
             .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
@@ -367,7 +396,6 @@ async def reject_pending_cuisine(
         )
 
     new_history = CuisineRequestHistory(
-        request_id=pending_cuisine.id,
         requested_by=pending_cuisine.requested_by,
         cuisine_name=pending_cuisine.cuisine_name,
         cuisine_slug=pending_cuisine.cuisine_slug,
@@ -410,10 +438,8 @@ async def reject_pending_cuisine(
     db.add_all(notifications)
 
     await db.execute(
-        update(RestaurantCuisineMapping)
-        .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
-        .values(
-            status=MappedCuisineStatus.REJECTED,
+        delete(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.request_id == pending_cuisine.id
         )
     )
 
