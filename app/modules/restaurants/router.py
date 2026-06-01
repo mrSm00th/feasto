@@ -14,6 +14,8 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.dependencies import require_roles
+from app.core.image_processing import ImageProcessingError, process_image
+from app.core.storage import StorageBackend, get_storage
 from app.db.database import get_db
 from app.modules.restaurants.models import (
     CuisineRequest,
@@ -42,16 +44,13 @@ from app.modules.restaurants.schemas import (
     RestaurantHoursUpload,
     RestaurantImageUploadResponse,
 )
-from app.modules.restaurants.storage import StorageBackend, get_storage
 from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
-    ImageProcessingError,
     _build_availability_rows,
     _get_owned_restaurant,
     _get_upsert_fn,
     generate_unique_slug,
     normalize,
     normalize_cuisine_name,
-    process_image,
     slugify,
 )
 from app.modules.users.models import User, UserRole
