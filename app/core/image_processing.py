@@ -21,6 +21,11 @@ class ImageProcessingError(Exception):
     """Raised when the uploaded bytes cannot be decoded or are an unsupported format."""
 
 
+def _image_key(restaurant_id: uuid.UUID, filename: str, prefix: str) -> str:
+    """Stable, collision-free storage key for a restaurant image."""
+    return f"{prefix}/{restaurant_id}/{filename}"
+
+
 def process_image(content: bytes) -> tuple[bytes, str]:
     """
     Validate, resize, and re-encode *content* as a JPEG.

@@ -15,6 +15,7 @@ Files are uploaded to  s3://<bucket>/<key>.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from io import BytesIO
@@ -187,3 +188,14 @@ def get_storage() -> StorageBackend:
     if backend == "s3":
         return S3Storage()
     return LocalStorage()
+
+
+async def _cleanup_keys(storage: StorageBackend, keys: list[str]) -> None:
+    """Delete storage objects without raising — used in error-recovery paths."""
+    results = await asyncio.gather(
+        *[storage.delete(k) for k in keys],
+        return_exceptions=True,
+    )
+    for key, result in zip(keys, results):
+        if isinstance(result, Exception):
+            logger.warning("Cleanup failed for key %r: %s", key, result)

@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 import app.db.models_registry
 from app.db.database import Base, engine, get_db
 from app.modules.admin import router as admins
+from app.modules.menus import router as menus
 from app.modules.partner_applications import router as partner_applications
 from app.modules.restaurants import router as restaurants
 from app.modules.users import router as users
@@ -24,7 +25,11 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+app.mount("/media", StaticFiles(directory="media"), name="media")
+
+
 app.include_router(users.router)
 app.include_router(partner_applications.router)
 app.include_router(admins.router)
 app.include_router(restaurants.router)
+app.include_router(menus.router)
