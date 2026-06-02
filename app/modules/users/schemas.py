@@ -84,7 +84,6 @@ class CuisineRequestHistroryResponse(BaseSchema):
 class NotificationDetailResponse(NotificationResponse):
 
     content: str
-    reference: CuisineRequestHistroryResponse
 
 
 class PaginatedNotifications(BaseSchema):

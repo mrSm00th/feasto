@@ -249,9 +249,7 @@ async def get_notification_by_id(
 ):
 
     result = await db.execute(
-        select(Notification)
-        .options(selectinload(Notification.reference))
-        .where(
+        select(Notification).where(
             Notification.id == notification_id,
             Notification.user_id == current_user.id,
         )
@@ -274,10 +272,6 @@ async def get_notification_by_id(
         is_read=notification.is_read,
         read_at=notification.read_at,
         created_at=notification.created_at,
-        reference=CuisineRequestHistroryResponse(
-            id=notification.reference.id,
-            cuisine_name=notification.reference.cuisine_name,
-        ),
     )
 
     return return_object

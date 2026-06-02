@@ -360,8 +360,3 @@ class Notification(Base):
         back_populates="notifications",
     )
 
-    # referencing only the 'Rejected Request'
-    reference: Mapped["CuisineRequestHistory"] = relationship(
-        foreign_keys=[reference_id],
-        back_populates="notifications",
-    )

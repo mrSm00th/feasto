@@ -226,7 +226,7 @@ class Restaurant(Base):
         back_populates="restaurants",
     )
 
-    categories: Mapped[list["Category"]] = relationship(
+    categories: Mapped[list["MenuCategory"]] = relationship(
         back_populates="restaurant",
         cascade="all, delete-orphan",
     )
@@ -726,10 +726,6 @@ class CuisineRequestHistory(Base):
     rejector: Mapped["User"] = relationship(
         foreign_keys=[rejected_by],
         back_populates="rejected_cuisines",
-    )
-
-    notifications: Mapped[list["Notification"]] = relationship(
-        back_populates="reference",
     )
 
     requester: Mapped["User"] = relationship(

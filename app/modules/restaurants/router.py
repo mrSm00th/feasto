@@ -14,8 +14,8 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.dependencies import require_roles
-from app.core.image_processing import ImageProcessingError, process_image
-from app.core.storage import StorageBackend, get_storage
+from app.core.image_processing import ImageProcessingError, _image_key, process_image
+from app.core.storage import StorageBackend, _cleanup_keys, get_storage
 from app.db.database import get_db
 from app.modules.restaurants.models import (
     CuisineRequest,
@@ -67,11 +67,6 @@ MAX_FILES_PER_REQUEST = 5
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 RESTAURANT_IMAGES_PREFIX = "restaurant_images"
-
-
-def _image_key(restaurant_id: uuid.UUID, filename: str) -> str:
-    """Stable, collision-free storage key for a restaurant image."""
-    return f"{RESTAURANT_IMAGES_PREFIX}/{restaurant_id}/{filename}"
 
 
 # Create restaurant draft
@@ -286,7 +281,7 @@ async def upload_restaurant_images(
                 detail=f"{file.filename}: {exc}",
             ) from exc
 
-        key = _image_key(restaurant_id, filename)
+        key = _image_key(restaurant_id, filename, RESTAURANT_IMAGES_PREFIX)
         processed.append((jpeg_bytes, key))
 
     uploaded_keys: list[str] = []
@@ -337,20 +332,6 @@ async def upload_restaurant_images(
             for img in db_images
         ],
     }
-
-
-async def _cleanup_keys(storage: StorageBackend, keys: list[str]) -> None:
-    """Delete storage objects without raising — used in error-recovery paths."""
-    results = await asyncio.gather(
-        *[storage.delete(k) for k in keys],
-        return_exceptions=True,
-    )
-    for key, result in zip(keys, results):
-        if isinstance(result, Exception):
-            logger.warning("Cleanup failed for key %r: %s", key, result)
-
-
-# Set primary image
 
 
 @router.patch(
@@ -488,76 +469,6 @@ async def create_restaurant_hours(
     hours = result.scalars().all()
 
     return RestaurantHoursResponse(hours=hours)
-
-
-# POST /{restaurant_id}/hours
-# Onboarding step — set the full weekly schedule
-
-
-# NOTE Evaluate for after mid night closing time
-@router.post(
-    "/{restaurant_id}/hours",
-    response_model=RestaurantHoursResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Set restaurant hours (onboarding)",
-    description=(
-        "Upserts the weekly availability schedule. Safe to call multiple times "
-        "during onboarding — existing shifts for submitted days are overwritten. "
-        "Days not included in the payload are left untouched."
-    ),
-)
-async def create_restaurant_hours(
-    restaurant_id: uuid.UUID,
-    data: RestaurantHoursUpload,
-    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    await _get_owned_restaurant(restaurant_id, current_user.id, db)
-
-    rows = _build_availability_rows(restaurant_id, data.hours)
-
-    dialect_insert = _get_upsert_fn()
-
-    stmt = dialect_insert(RestaurantAvailability).values(rows)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["restaurant_id", "day_of_week", "shift_index"],
-        set_={
-            "status": stmt.excluded.status,
-            "opening_time": stmt.excluded.opening_time,
-            "closing_time": stmt.excluded.closing_time,
-            "updated_at": datetime.now(UTC),
-        },
-    )
-
-    try:
-        await db.execute(stmt)
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        logger.warning(
-            "Hours upsert integrity error for restaurant %s: %s", restaurant_id, exc
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid hours data. Check for constraint violations.",
-        ) from exc
-
-    result = await db.execute(
-        select(RestaurantAvailability)
-        .where(RestaurantAvailability.restaurant_id == restaurant_id)
-        .order_by(
-            RestaurantAvailability.day_of_week,
-            RestaurantAvailability.shift_index,
-        )
-    )
-    hours = result.scalars().all()
-
-    return RestaurantHoursResponse(hours=hours)
-
-
-#
-# PATCH /{restaurant_id}/hours/{day}
-# Update one day — replaces ALL shifts for that day atomically
 
 
 @router.patch(
