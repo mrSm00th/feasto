@@ -56,3 +56,15 @@ class ItemImageResponse(BaseSchema):
 
     id: uuid.UUID
     image_path: str
+
+
+class ImageResponse(BaseSchema):
+
+    id: uuid.UUID
+    image_path: str
+
+
+class RestaurantDiningMenuUploadResponse(BaseSchema):
+
+    uploaded: int
+    images: list[ImageResponse]

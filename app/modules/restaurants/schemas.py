@@ -4,7 +4,11 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.modules.restaurants.models import AvailabilityStatus, RestaurantStatus
+from app.modules.restaurants.models import (
+    AvailabilityStatus,
+    MappedCuisineStatus,
+    RestaurantStatus,
+)
 
 
 class BaseSchema(BaseModel):
@@ -244,3 +248,24 @@ class CuisineResponse(BaseSchema):
 class CreateCuisine(BaseSchema):
 
     cuisine_name: str
+
+
+class RestaurantPrimaryImageResponse(BaseSchema):
+
+    id: uuid.UUID
+    image_path: str
+
+
+class CuisineAdd(BaseSchema):
+
+    cuisine_id: uuid.UUID
+
+
+class CuisineAddResponse(BaseSchema):
+
+    id: uuid.UUID
+    cuisine_id: uuid.UUID
+    cuisine_name: str
+    cuisine_slug: str
+    cuisine_mapping_status: MappedCuisineStatus
+    created_at: datetime

@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     max_images_per_restaurant: int = 20
     restaurants_per_page: int = 10
     notifications_per_page: int = 10
-    max_dining_images_per_restaurant: int = 10
+    max_dining_menu_images_per_restaurant: int = 50
+    max_restaurant_images_per_request: int = 10
+    max_restaurant_dining_menu_images_per_request: int = 10
+    max_restaurant_food_images_per_request: int = 10
 
 
 settings = Settings()

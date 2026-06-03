@@ -58,13 +58,6 @@ class RestaurantStatus(str, enum.Enum):
     SUSPENDED = "SUSPENDED"
 
 
-class ImageType(str, enum.Enum):
-    BANNER = "BANNER"
-    LOGO = "LOGO"
-    GALLERY = "GALLERY"
-    THUMBNAIL = "THUMBNAIL"
-
-
 class Restaurant(Base):
     __tablename__ = "restaurants"
 
@@ -391,6 +384,13 @@ class RestaurantAvailability(Base):
     )
 
 
+class RestaurantImageType(str, enum.Enum):
+
+    RESTAURANT_PHOTO = "RESTAURANT_PHOTO"
+    FOOD_GALLERY = "FOOD_GALLERY"
+    DINING_MENU = "DINING_MENU"
+
+
 class RestaurantImage(Base):
 
     __tablename__ = "restaurant_images"
@@ -407,8 +407,8 @@ class RestaurantImage(Base):
 
     image_url: Mapped[str] = mapped_column(Text, nullable=False)
 
-    image_type: Mapped[ImageType] = mapped_column(
-        Enum(ImageType), default=ImageType.GALLERY
+    image_type: Mapped[RestaurantImageType] = mapped_column(
+        Enum(RestaurantImageType), default=RestaurantImageType.RESTAURANT_PHOTO
     )
 
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
