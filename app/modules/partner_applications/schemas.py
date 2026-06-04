@@ -17,7 +17,7 @@ class PartnerApplicationCreate(BaseSchema):
     gst_number: Annotated[str, Field(min_length=15, max_length=15)]
 
 
-class PartnerApplicationResponse(
+class PartnerApplicationCreateResponse(
     PartnerApplicationCreate
 ):  # only sending the response to the owner
 

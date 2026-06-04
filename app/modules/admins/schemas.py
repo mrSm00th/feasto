@@ -13,14 +13,6 @@ class BaseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PartnerApplicationHistory(BaseSchema):
-    id: uuid.UUID
-    status: ApplicationStatus
-    rejection_reason: str | None
-    created_at: datetime
-    reviewed_at: datetime | None
-
-
 class PendingApplicationsList(BaseSchema):
 
     id: uuid.UUID
@@ -46,11 +38,6 @@ class PartnerApplicationDetailed(BaseSchema):
     status: ApplicationStatus
     rejection_reason: Annotated[str | None, Field(max_length=500)]
     created_at: datetime
-
-
-class PartnerApplicationWithHistory(BaseSchema):
-    application: PartnerApplicationDetailed
-    history: list[PartnerApplicationHistory]
 
 
 class PartnerApplicationAdminReview(
@@ -94,3 +81,8 @@ class ApprovedCuisineResponse(BaseSchema):
 class RejectionReason(BaseSchema):
 
     rejection_reason: Annotated[str, Field(min_length=10, max_length=500)]
+
+
+class RevocationReason(BaseSchema):
+
+    revocation_reason: Annotated[str, Field(min_length=10, max_length=500)]

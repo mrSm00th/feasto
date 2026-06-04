@@ -12,6 +12,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,6 +25,13 @@ class MenuItemImageType(str, enum.Enum):
     PRIMARY = "PRIMARY"  # main image shown in UI
     GALLERY = "GALLERY"  # additional images
     THUMBNAIL = "THUMBNAIL"  # small preview (optional)
+
+
+class MenuItemStatus(str, enum.Enum):
+
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+    DELETED = "DELETED"
 
 
 class MenuItem(Base):
@@ -43,12 +51,23 @@ class MenuItem(Base):
     )
 
     category_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("categories.id"),
+        ForeignKey("menu_categories.id"),
         nullable=False,
         index=True,
     )
 
+    status: Mapped[MenuItemStatus] = mapped_column(
+        Enum(MenuItemStatus),
+        nullable=False,
+        default=MenuItemStatus.ACTIVE,
+    )
+
     name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    normalized_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
@@ -76,11 +95,13 @@ class MenuItem(Base):
     veg_type: Mapped[VegType] = mapped_column(
         Enum(VegType),
         default=VegType.VEG,
+        nullable=False,
     )
 
     is_available: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
+        nullable=False,
     )
 
     preparation_time_minutes: Mapped[int | None] = mapped_column(
@@ -100,8 +121,19 @@ class MenuItem(Base):
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     # RELATIONSHIP
@@ -110,7 +142,7 @@ class MenuItem(Base):
         back_populates="menu_items",
     )
 
-    category: Mapped["Category"] = relationship(
+    category: Mapped["MenuCategory"] = relationship(
         back_populates="menu_items",
     )
 
@@ -122,38 +154,80 @@ class MenuItem(Base):
         back_populates="menu_item",
     )
 
+    __table_args__ = (
+        UniqueConstraint(
+            "category_id",
+            "normalized_name",
+            name="uq_menu_item_category_normalized_name",
+        ),
+    )
+
 
 class MenuItemImage(Base):
 
     __tablename__ = "menu_item_images"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, primary_key=True, default=uuid.uuid4, index=True
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True,
     )
+
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("restaurants.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        nullable=False,
     )
-    image_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    image_url: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
     image_type: Mapped[MenuItemImageType] = mapped_column(
-        Enum(MenuItemImageType), default=MenuItemImageType.GALLERY
+        Enum(MenuItemImageType),
+        default=MenuItemImageType.GALLERY,
     )
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    alt_text: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+    )
+
+    alt_text: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC)
-    )
-    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         onupdate=lambda: datetime.now(UTC),
     )
 
-    restaurant: Mapped["Restaurant"] = relationship(back_populates="menu_item_images")
+    restaurant: Mapped["Restaurant"] = relationship(
+        back_populates="menu_item_images",
+    )
 
 
-class Category(Base):
-    __tablename__ = "categories"
+class MenuCategoryStatus(str, enum.Enum):
+
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+    DELETED = "DELETED"
+
+
+class MenuCategory(Base):
+    __tablename__ = "menu_categories"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
@@ -168,13 +242,25 @@ class Category(Base):
         index=True,
     )
 
+    status: Mapped[MenuCategoryStatus] = mapped_column(
+        Enum(MenuCategoryStatus),
+        nullable=False,
+        default=MenuCategoryStatus.ACTIVE,
+    )
+
     name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
     )
 
+    normalized_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    # optional description
     description: Mapped[str | None] = mapped_column(
-        Text,
+        String(350),
         nullable=True,
     )
 
@@ -188,6 +274,10 @@ class Category(Base):
         default=lambda: datetime.now(UTC),
     )
 
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+
     # RELATIONSHIPS
     restaurant: Mapped["Restaurant"] = relationship(
         back_populates="categories",
@@ -195,4 +285,15 @@ class Category(Base):
 
     menu_items: Mapped[list["MenuItem"]] = relationship(
         back_populates="category",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            restaurant_id,
+            display_order,
+        ),
+        UniqueConstraint(
+            restaurant_id,
+            normalized_name,
+        ),
     )

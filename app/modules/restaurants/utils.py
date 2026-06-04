@@ -1,74 +1,159 @@
-import uuid
-from io import BytesIO
-from math import asin, cos, radians, sin, sqrt
-from pathlib import Path
+from __future__ import annotations
 
-from PIL import Image, ImageOps
+import re
+import unicodedata
+import uuid
+from math import asin, cos, radians, sin, sqrt
+
+from fastapi import HTTPException, status
 from slugify import slugify
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.modules.restaurants.models import Restaurant
-
-
-async def generate_unique_slug(db, name: str) -> str:
-    base_slug = slugify(name)
-    slug = base_slug
-    counter = 1
-
-    while True:
-        existing = await db.execute(select(Restaurant).where(Restaurant.slug == slug))
-        if not existing.scalar():
-            return slug
-
-        slug = f"{base_slug}-{counter}"
-        counter += 1
 
 
 def normalize(text: str) -> str:
     return text.strip().lower()
 
 
-# The Haversine formula -> distance in meters
-def calculate_distance(lat1, lon1, lat2, lon2):
-    # convert decimal degrees to radians
+async def generate_unique_slug(db: AsyncSession, name: str, city: str) -> str:
+    """
+    Produce a URL-safe slug in the form  {name}-{city}  or
+    {name}-{city}-{n}  (n ≥ 2) if a collision exists.
+
+    The LIKE pre-filter keeps the query fast; the regex post-filter
+    ensures we only count exact variants, not unrelated restaurants
+    whose slug happens to share the same prefix.
+    """
+    base_slug = slugify(f"{name} {city}")
+
+    # Only fetch slugs that are this base or could be numbered variants of it
+    candidate_pattern = re.compile(rf"^{re.escape(base_slug)}(-\d+)?$")
+
+    result = await db.execute(
+        select(Restaurant.slug).where(Restaurant.slug.like(f"{base_slug}%"))
+    )
+    existing = {row[0] for row in result.all() if candidate_pattern.match(row[0])}
+
+    if base_slug not in existing:
+        return base_slug
+
+    # Start at 2 so the series reads:
+    #   mcdonalds-mumbai  →  mcdonalds-mumbai-2  →  mcdonalds-mumbai-3
+    counter = 2
+    while f"{base_slug}-{counter}" in existing:
+        counter += 1
+
+    return f"{base_slug}-{counter}"
+
+
+# Geo distance  (Haversine)
+
+
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return the distance in metres between two (lat, lon) points."""
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-
+    dlon, dlat = lon2 - lon1, lat2 - lat1
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    c = 2 * asin(sqrt(a))
-
-    r = 6371000  # The Radius of earth in meters
-    return c * r
+    return 2 * asin(sqrt(a)) * 6_371_000  # Earth radius in metres
 
 
-RESTAURANT_PICS_DIR = Path("media\restaurant_pics")
+def _get_upsert_fn():
+    """
+    Return the dialect-specific `insert` function.
+    Centralised here so every route stays dialect-agnostic.
+    Switch from SQLite to PostgreSQL by changing DATABASE_URL — no route changes.
+    """
+    db_url: str = settings.database_url
+    if db_url.startswith("postgresql"):
+        from sqlalchemy.dialects.postgresql import insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+    return insert
 
 
-def process_restaurant_image(content: bytes) -> str:
-    with Image.open(BytesIO(content)) as original:
-        img = ImageOps.exif_transpose(original)
+async def _get_owned_restaurant(
+    restaurant_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    db: AsyncSession,
+) -> Restaurant:
+    """
+    Fetch a restaurant and verify ownership in one query.
+    Raises 404 for both "not found" and "not owned" — avoids leaking
+    the existence of restaurants owned by others.
+    """
+    restaurant = await db.scalar(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == owner_id,
+        )
+    )
+    if not restaurant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found.",
+        )
+    return restaurant
 
-        img = ImageOps.fit(img, (300, 300), method=Image.Resampling.LANCZOS)
 
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGB")
+def _build_availability_rows(
+    restaurant_id: uuid.UUID,
+    shifts: list,
+) -> list[dict]:
+    """Convert validated schema entries into dicts for bulk upsert."""
+    return [
+        {
+            "id": uuid.uuid4(),
+            "restaurant_id": restaurant_id,
+            "day_of_week": entry.day_of_week,
+            "status": entry.status,
+            "opening_time": entry.opening_time,
+            "closing_time": entry.closing_time,
+            "shift_index": entry.shift_index,
+        }
+        for entry in shifts
+    ]
 
-        filename = f"{uuid.uuid4().hex}.jpg"
-        filepath = RESTAURANT_PICS_DIR / filename
 
-        RESTAURANT_PICS_DIR.mkdir(parents=True, exist_ok=True)
+def normalize_cuisine_name(name: str) -> str:
+    if not name or not name.strip():
+        raise ValueError("Cuisine name cannot be empty")
 
-        img.save(filepath, "JPEG", quality=85, optimize=True)
+    # normalize the cuisine name
+    name = unicodedata.normalize("NFKD", name)
+    name = name.encode("ascii", "ignore").decode("ascii")
 
-    return filename
+    name = name.lower()
+
+    # Standardizing the  connectors
+    name = re.sub(r"\s*(&|\+|/)\s*", " and ", name)
+
+    # Replacing the separators
+    name = re.sub(r"[-_]+", " ", name)
+
+    # Remove special chars
+    name = re.sub(r"[^a-z0-9 ]+", "", name)
+
+    # Collapse spaces
+    name = re.sub(r"\s+", " ", name).strip()
+
+    return name.title()
 
 
-def delete_restaurant_image(filename: str | None) -> None:
-    if filename is None:
-        return
+def slugify(value: str) -> str:
 
-    filepath = RESTAURANT_PICS_DIR / filename
-    if filepath.exists():
-        filepath.unlink()
+    # Normalize unicode characters (é -> e)
+    value = unicodedata.normalize("NFKD", value)
+    value = value.encode("ascii", "ignore").decode("ascii")
+
+    value = value.lower()
+
+    # Replacing all  non-alphanumeric chars with hyphen
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+
+    # Removing any  leading/trailing hyphens
+    value = value.strip("-")
+
+    return value

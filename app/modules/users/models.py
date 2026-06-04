@@ -146,6 +146,43 @@ class User(Base):
         foreign_keys="[PartnerApplication.reviewed_by]",
     )
 
+    # cuisines requested by the user(RESTAURANT_OWNER)- PENDING
+    pending_created_cuisines: Mapped[list["CuisineRequest"]] = relationship(
+        back_populates="requester",
+        foreign_keys="[CuisineRequest.requested_by]",
+    )
+
+    approved_created_cuisines: Mapped[list["CuisineType"]] = relationship(
+        back_populates="requester",
+        foreign_keys="[CuisineType.requested_by]",
+    )
+
+    rejected_created_cuisines: Mapped[list["CuisineRequestHistory"]] = relationship(
+        back_populates="requester",
+        foreign_keys="[CuisineRequestHistory.requested_by]",
+    )
+
+    # cuisines approved by the user(ADMIN)
+    approved_cuisines: Mapped[list["CuisineType"]] = relationship(
+        back_populates="approver",
+        foreign_keys="[CuisineType.approved_by]",
+    )
+
+    revoked_cuisines: Mapped[list["CuisineType"]] = relationship(
+        back_populates="revoker",
+        foreign_keys="[CuisineType.revoked_by]",
+    )
+
+    # cuisines rejected by the user(ADMIN)
+    rejected_cuisines: Mapped[list["CuisineRequestHistory"]] = relationship(
+        back_populates="rejector",
+        foreign_keys="[CuisineRequestHistory.rejected_by]",
+    )
+
+    notifications: Mapped[list["Notification"]] = relationship(
+        back_populates="user",
+    )
+
 
 class Address(Base):
     __tablename__ = "addresses"
@@ -263,3 +300,68 @@ class RefreshToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="refresh_tokens")
+
+
+class NotificationType(str, enum.Enum):
+
+    CUISINE_APPROVED = "CUISINE_APPROVED"
+    CUISINE_REJECTED = "CUISINE_REJECTED"
+    CUISINE_REVOKED = "CUISINE_REVOKED"
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        nullable=False,
+        index=True,
+        default=uuid.uuid4,
+    )
+
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+
+    type: Mapped[NotificationType] = mapped_column(
+        Enum(NotificationType),
+        nullable=False,
+    )
+
+    reference_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cuisine_request_history.id"),
+        nullable=False,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    content: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+
+    is_read: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    user: Mapped["User"] = relationship(
+        foreign_keys=[user_id],
+        back_populates="notifications",
+    )

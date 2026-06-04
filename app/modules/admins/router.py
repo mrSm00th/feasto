@@ -13,17 +13,16 @@ from app.core.auth import hash_password
 from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
-from app.modules.admin.schemas import (
+from app.modules.admins.schemas import (
     ApprovedCuisineResponse,
     PaginatedApplicationResponse,
     PaginatedPendingCuisineResponse,
     PartnerApplicationAdminReview,
     PartnerApplicationDetailed,
-    PartnerApplicationHistory,
-    PartnerApplicationWithHistory,
     PendingApplicationsList,
     PendingCuisineRequest,
     RejectionReason,
+    RevocationReason,
 )
 from app.modules.partner_applications.models import (
     ApplicationStatus,
@@ -152,7 +151,7 @@ async def paginated_pending_applications(
 # route for all pending applications
 @router.get(
     "/owner-applications/{id}",
-    response_model=PartnerApplicationWithHistory,
+    response_model=PartnerApplicationDetailed,
     status_code=status.HTTP_200_OK,
 )
 async def onwer_application_detailed(
@@ -169,30 +168,7 @@ async def onwer_application_detailed(
 
     application = result.scalars().first()
 
-    if not application:
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Application not found",
-        )
-
-    history_result = await db.execute(
-        select(PartnerApplication)
-        .where(
-            PartnerApplication.applicant_id == application.applicant_id,
-            PartnerApplication.id != application.id,
-            PartnerApplication.status == ApplicationStatus.REJECTED,
-        )
-        .order_by(PartnerApplication.created_at.desc())
-        .limit(5)
-    )
-
-    history = history_result.scalars().all()
-
-    return PartnerApplicationWithHistory(
-        application=application,
-        history=history,
-    )
+    return application
 
 
 @router.patch(
@@ -286,7 +262,7 @@ async def paginated_pending_cuisine_requests(
 
 
 @router.post(
-    "/cuisines/{id}/approve",
+    "/pending-cuisine/{id}/approve",
     response_model=ApprovedCuisineResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -352,7 +328,7 @@ async def approve_pending_cuisine(
         notifications = [
             Notification(
                 user_id=owner_id,
-                type=NotificationType.CUISINE_ACCEPTED,
+                type=NotificationType.CUISINE_APPROVED,
                 reference_id=new_cuisine.id,
                 title="Cuisine Request Accepted",
                 content=(
@@ -386,11 +362,12 @@ async def approve_pending_cuisine(
             detail="Cuisine approval failed due to a data conflict.",
         )
 
-    except Exception:
+    except Exception as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to approve cuisine request.",
+            # detail="Failed to approve cuisine request.",
+            detail=str(exc),
         )
 
     await db.refresh(new_cuisine)
@@ -399,7 +376,7 @@ async def approve_pending_cuisine(
 
 
 @router.post(
-    "/cuisines/{id}/reject",
+    "/pending-cuisines/{id}/reject",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def reject_pending_cuisine(
@@ -478,6 +455,89 @@ async def reject_pending_cuisine(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cuisine rejection failed due to a data conflict.",
+        )
+
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reject cuisine request.",
+        )
+
+
+@router.patch(
+    "/cuisine/{id}/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def revoke_approved_cuisine(
+    id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    data: RevocationReason,
+):
+
+    result = await db.execute(select(CuisineType).where(CuisineType.id == id))
+
+    approved_cuisine = result.scalars().first()
+
+    if not approved_cuisine:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cuisine Not found",
+        )
+
+    approved_cuisine.status = CuisineStatus.REVOKED
+    approved_cuisine.revocation_reason = data.revocation_reason
+    approved_cuisine.revoked_at = datetime.now(UTC)
+    approved_cuisine.revoked_by = current_user.id
+
+    result = await db.execute(
+        select(User.id)
+        .distinct()
+        .join(Restaurant, Restaurant.owner_id == User.id)
+        .join(
+            RestaurantCuisineMapping,
+            RestaurantCuisineMapping.restaurant_id == Restaurant.id,
+        )
+        .where(RestaurantCuisineMapping.cuisine_id == approved_cuisine.id)
+    )
+
+    owner_ids = result.scalars().all()
+
+    notifications = [
+        Notification(
+            user_id=owner_id,
+            type=NotificationType.CUISINE_REVOKED,
+            reference_id=approved_cuisine.id,
+            title="Cuisine Request Revoked",
+            content=(
+                f"The cuisine '{approved_cuisine.cuisine_name}' used by your restaurant"
+                f"was rejected by an administrator."
+            ),
+        )
+        for owner_id in owner_ids
+    ]
+
+    db.add_all(notifications)
+
+    await db.execute(
+        delete(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.cuisine_id == approved_cuisine.id
+        )
+    )
+
+    try:
+
+        await db.delete(approved_cuisine)
+        await db.commit()
+
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            # detail="Cuisine revocation failed due to a data conflict.",
+            detail=str(exc),
         )
 
     except Exception:
