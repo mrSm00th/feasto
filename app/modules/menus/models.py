@@ -95,11 +95,13 @@ class MenuItem(Base):
     veg_type: Mapped[VegType] = mapped_column(
         Enum(VegType),
         default=VegType.VEG,
+        nullable=False,
     )
 
     is_available: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
+        nullable=False,
     )
 
     preparation_time_minutes: Mapped[int | None] = mapped_column(
@@ -119,20 +121,19 @@ class MenuItem(Base):
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
 
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
+        nullable=True,
     )
 
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
+        nullable=True,
     )
 
     # RELATIONSHIP
@@ -151,6 +152,14 @@ class MenuItem(Base):
 
     order_items: Mapped[list["OrderItem"]] = relationship(
         back_populates="menu_item",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "category_id",
+            "normalized_name",
+            name="uq_menu_item_category_normalized_name",
+        ),
     )
 
 
@@ -202,7 +211,6 @@ class MenuItemImage(Base):
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
 
@@ -268,7 +276,6 @@ class MenuCategory(Base):
 
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
     )
 
     # RELATIONSHIPS

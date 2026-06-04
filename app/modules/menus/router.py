@@ -114,21 +114,38 @@ async def create_menu_category(
     return new_menu_category
 
 
+# =========================
+# CREATE MENU ITEM
+# =========================
+
+
 @router.post(
-    "/categories/{category_id}/items",
+    "/{restaurant_id}/menu-categories/{category_id}/items",
     response_model=MenuItemResponse,
 )
 async def create_menu_item(
+    restaurant_id: uuid.UUID,
     category_id: uuid.UUID,
-    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.RESTAURANT_OWNER)),
+    ],
     db: Annotated[AsyncSession, Depends(get_db)],
     data: MenuItemCreate,
 ):
 
+    # =========================
+    # VERIFY CATEGORY BELONGS TO
+    # THE OWNER AND RESTAURANT
+    # =========================
     result = await db.execute(
         select(MenuCategory)
         .join(Restaurant)
-        .where(MenuCategory.id == category_id, Restaurant.owner_id == current_user.id)
+        .where(
+            MenuCategory.id == category_id,
+            MenuCategory.restaurant_id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
     )
 
     try:
@@ -136,13 +153,12 @@ async def create_menu_item(
 
     except NoResultFound:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Menu category not found",
         )
 
-    # just for extra safety
+    # just a Defensive check against data corruption
     except MultipleResultsFound:
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Data integrity error: multiple categories found.",
@@ -150,20 +166,23 @@ async def create_menu_item(
 
     normalized_name = normalize(data.name)
 
+    # =========================
+    # CHECK DUPLICATE ITEM
+    # WITHIN CATEGORY
+    # =========================
     result = await db.execute(
         select(MenuItem.id).where(
-            MenuItem.normalized_name == normalized_name,
             MenuItem.category_id == category_id,
+            MenuItem.normalized_name == normalized_name,
         )
     )
 
-    exisiting_menu_item = result.scalars().first()
+    existing_menu_item = result.scalar_one_or_none()
 
-    if exisiting_menu_item:
-
+    if existing_menu_item:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Menu Item already exists for this category",
+            detail="Menu item already exists for this category",
         )
 
     new_item = MenuItem(
@@ -171,50 +190,60 @@ async def create_menu_item(
         category_id=category.id,
         name=data.name,
         normalized_name=normalized_name,
-        description=data.description if data.description else None,
+        description=data.description,
         price=data.price,
-        discounted_price=data.discounted_price if data.discounted_price else None,
+        discounted_price=data.discounted_price,
         veg_type=data.veg_type,
         is_available=data.is_available,
         preparation_time_minutes=data.preparation_time_minutes,
-        calories=data.calories if data.calories else None,
+        calories=data.calories,
     )
 
     db.add(new_item)
 
     try:
-
         await db.commit()
         await db.refresh(new_item)
 
     except IntegrityError as exc:
-
         await db.rollback()
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=" Menu Item already exists for this category ",
+            detail="Failed to create menu item.",
         ) from exc
 
     return new_item
 
 
+# =========================
+# UPLOAD MENU ITEM IMAGE
+# =========================
 @router.put(
-    "/items/{item_id}/image",
+    "/{restaurant_id}/menu-categories/{category_id}/items/{item_id}/image",
     response_model=ItemImageResponse,
 )
 async def upload_image_for_menu_item(
+    restaurant_id: uuid.UUID,
+    category_id: uuid.UUID,
     item_id: uuid.UUID,
     image: Annotated[UploadFile, File(description="Menu item image (JPEG/PNG/WEBP)")],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage)],
 ):
+
+    # =========================
+    # VERIFY ITEM OWNERSHIP
+    # AND URL CONSISTENCY
+    # =========================
     result = await db.execute(
         select(MenuItem)
         .join(Restaurant)
         .where(
             MenuItem.id == item_id,
+            MenuItem.category_id == category_id,
+            MenuItem.restaurant_id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
@@ -224,9 +253,12 @@ async def upload_image_for_menu_item(
     if item is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu item not found for this owner",
+            detail="Menu item not found",
         )
 
+    # =========================
+    # VALIDATE MIME TYPE
+    # =========================
     if image.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -236,23 +268,44 @@ async def upload_image_for_menu_item(
             ),
         )
 
+    # =========================
+    # READ IMAGE
+    # =========================
     raw = await image.read()
 
+    # =========================
+    # PROCESS IMAGE
+    # =========================
     try:
         jpeg_bytes, filename = await run_in_threadpool(
             process_image,
             raw,
         )
+
     except ImageProcessingError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
+            detail=(
+                "Failed to process image. Ensure it is a valid "
+                "JPEG, PNG, or WEBP image and is not corrupted."
+            ),
         ) from exc
 
-    key = _image_key(item_id, filename, MENU_ITEM_IMAGE_STORAGE_PREFIX)
+    # =========================
+    # GENERATE STORAGE KEY
+    # =========================
+    key = _image_key(
+        item_id,
+        filename,
+        MENU_ITEM_IMAGE_STORAGE_PREFIX,
+    )
 
+    # =========================
+    # UPLOAD TO STORAGE
+    # =========================
     try:
         await storage.upload(jpeg_bytes, key)
+
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -261,10 +314,14 @@ async def upload_image_for_menu_item(
 
     old_key = item.image_url
 
+    # =========================
+    # UPDATE DATABASE
+    # =========================
     item.image_url = key
 
     try:
         await db.commit()
+
     except Exception as exc:
         await db.rollback()
 
@@ -277,12 +334,19 @@ async def upload_image_for_menu_item(
 
     await db.refresh(item)
 
+    # =========================
+    # DELETE OLD IMAGE
+    # AFTER SUCCESSFUL COMMIT
+    # =========================
     if old_key:
         try:
             await storage.delete(old_key)
         except Exception:
             pass
 
+    # =========================
+    # RETURN RESPONSE
+    # =========================
     return ItemImageResponse(
         id=item.id,
         image_path=storage.public_url(item.image_url),
@@ -290,7 +354,7 @@ async def upload_image_for_menu_item(
 
 
 @router.post(
-    "dining-menu/{restaurant_id}/images",
+    "/{restaurant_id}/dining-menu/images",
     response_model=RestaurantDiningMenuUploadResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra={

@@ -342,7 +342,7 @@ async def upload_restaurant_images(
     }
 
 
-@router.put(
+@router.patch(
     "/{restaurant_id}/primary-image",
     response_model=RestaurantPrimaryImageResponse,
 )
@@ -456,7 +456,7 @@ async def upload_primary_image_for_restaurant(
 
 
 @router.post(
-    "/{restaurant_id}/images",
+    "/{restaurant_id}/food-images",
     response_model=RestaurantImageUploadResponse,
     status_code=status.HTTP_201_CREATED,
     openapi_extra={
@@ -897,10 +897,10 @@ async def delete_closure(
 
 
 @router.post(
-    "/{restaurant_id}/cuisine",
+    "/{restaurant_id}/cuisine/request",
     response_model=CuisineResponse,
 )
-async def create_new_cuisine(
+async def request_new_cuisine(
     restaurant_id: uuid.UUID,
     current_user: Annotated[
         User,
@@ -1073,37 +1073,3 @@ async def upload_cuisine_for_restaurant(
         cuisine_mapping_status=new_mapping.MappedCuisineStatus,
         created_at=new_mapping.created_at,
     )
-
-
-# NOTE- evaluate this route and remove 500
-@router.get(
-    "/cuisines",
-    response_model=list[CuisineResponse],
-)
-async def get_top_cuisine_types(
-    current_user: Annotated[
-        User,
-        Depends(
-            require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER, UserRole.ADMIN)
-        ),
-    ],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-
-    result = await db.execute(
-        select(CuisineType)
-        .where(CuisineType.status == CuisineStatus.ACTIVE)
-        .order_by(CuisineType.use_count.desc())
-        .limit(5)
-    )
-
-    cuisines = result.scalars().all()
-
-    if not cuisines:
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="There's a problem while fetching cuisines",
-        )
-
-    return cuisines
