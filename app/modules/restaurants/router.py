@@ -408,6 +408,7 @@ async def upload_primary_image_for_restaurant(
     )
 
     old_primary_image = result.scalars().first()
+    old_key = None
 
     if old_primary_image:
 
@@ -1022,7 +1023,7 @@ async def upload_cuisine_for_restaurant(
 
     cuisine = result.scalars().first()
 
-    if not cuisine or cuisine.status == CuisineStatus.ARCHIVED:
+    if not cuisine or cuisine.status == CuisineStatus.REVOKED:
 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

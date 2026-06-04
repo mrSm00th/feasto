@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
-from app.modules.admin.schemas import PartnerApplicationDetailed
+from app.modules.admins.schemas import PartnerApplicationDetailed
 from app.modules.partner_applications.models import (
     ApplicationStatus,
     PartnerApplication,
@@ -18,8 +18,8 @@ from app.modules.partner_applications.models import (
 from app.modules.partner_applications.schemas import (
     PaginatedPartnerAppResponse,
     PartnerApplicationCreate,
+    PartnerApplicationCreateResponse,
     PartnerApplicationMini,
-    PartnerApplicationResponse,
 )
 from app.modules.users.models import User, UserRole
 
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/partner-applications", tags=["partner applicatio
 
 @router.post(
     "/",
-    response_model=PartnerApplicationResponse,
+    response_model=PartnerApplicationCreateResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_partner_application(
@@ -76,7 +76,7 @@ async def create_partner_application(
     "/",
     response_model=PaginatedPartnerAppResponse,
 )
-async def get_partner_applications_paginated(
+async def get_owner_applications_paginated(
     current_user: Annotated[
         User, Depends(require_roles(UserRole.CUSTOMER, UserRole.RESTAURANT_OWNER))
     ],

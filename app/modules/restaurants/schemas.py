@@ -28,9 +28,17 @@ class RestaurantCreate(BaseSchema):
     country: Annotated[str, Field(min_length=1, max_length=100)]
 
 
-class RestaurantCreateResponse(RestaurantCreate):
+class RestaurantCreateResponse(BaseSchema):
     id: uuid.UUID
     status: RestaurantStatus
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+    phone_number: Annotated[str, Field(min_length=7, max_length=20)]
+    address_line_1: Annotated[str, Field(min_length=1, max_length=255)]
+    address_line_2: Annotated[str | None, Field(max_length=255)] = None
+    city: Annotated[str, Field(min_length=1, max_length=100)]
+    state: Annotated[str, Field(min_length=1, max_length=100)]
+    postal_code: Annotated[str, Field(min_length=1, max_length=20)]
+    country: Annotated[str, Field(min_length=1, max_length=100)]
 
 
 class RestaurantDocumentsUpload(BaseSchema):

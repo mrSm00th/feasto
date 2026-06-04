@@ -168,6 +168,11 @@ class User(Base):
         foreign_keys="[CuisineType.approved_by]",
     )
 
+    revoked_cuisines: Mapped[list["CuisineType"]] = relationship(
+        back_populates="revoker",
+        foreign_keys="[CuisineType.revoked_by]",
+    )
+
     # cuisines rejected by the user(ADMIN)
     rejected_cuisines: Mapped[list["CuisineRequestHistory"]] = relationship(
         back_populates="rejector",
@@ -301,6 +306,7 @@ class NotificationType(str, enum.Enum):
 
     CUISINE_APPROVED = "CUISINE_APPROVED"
     CUISINE_REJECTED = "CUISINE_REJECTED"
+    CUISINE_REVOKED = "CUISINE_REVOKED"
 
 
 class Notification(Base):
@@ -359,4 +365,3 @@ class Notification(Base):
         foreign_keys=[user_id],
         back_populates="notifications",
     )
-

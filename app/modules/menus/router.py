@@ -42,9 +42,6 @@ router = APIRouter(
 MAX_FILES_PER_REQUEST = settings.max_restaurant_images_per_request
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
-# MENU_ITEM_IMAGE_STORAGE_PREFIX = "menu-items"
-# RESTAURANT_IMAGES_PREFIX = "restaurant_images"
-
 
 @router.post(
     "/{restaurant_id}/menu-categories", response_model=MenuCategoryCreateResponse

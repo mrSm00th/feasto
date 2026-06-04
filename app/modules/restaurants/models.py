@@ -470,7 +470,8 @@ class RestaurantClosure(Base):
 # Only used for CuisineType
 class CuisineStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
-    ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
+    # ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
+    REVOKED = "REVOKED"
 
 
 class CuisineType(Base):
@@ -523,8 +524,18 @@ class CuisineType(Base):
         nullable=True,
     )
 
-    archived_at: Mapped[datetime | None] = mapped_column(
+    revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+    )
+
+    revocation_reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
     )
 
     # relationships
@@ -544,13 +555,19 @@ class CuisineType(Base):
         back_populates="approved_cuisines",
     )
 
+    revoker: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[revoked_by],
+        back_populates="approved_cuisines",
+    )
+
 
 # Used for the Mapping model
 class MappedCuisineStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     PENDING_REVIEW = "PENDING_REVIEW"
-    ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
-    REJECTED = "REJECTED"
+    # ARCHIVED = "ARCHIVED"  # a valid Cuisine not in use now
+    # REJECTED = "REJECTED"
 
 
 class RestaurantCuisineMapping(Base):

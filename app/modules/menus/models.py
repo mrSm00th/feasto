@@ -27,6 +27,13 @@ class MenuItemImageType(str, enum.Enum):
     THUMBNAIL = "THUMBNAIL"  # small preview (optional)
 
 
+class MenuItemStatus(str, enum.Enum):
+
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+    DELETED = "DELETED"
+
+
 class MenuItem(Base):
     __tablename__ = "menu_items"
 
@@ -47,6 +54,12 @@ class MenuItem(Base):
         ForeignKey("menu_categories.id"),
         nullable=False,
         index=True,
+    )
+
+    status: Mapped[MenuItemStatus] = mapped_column(
+        Enum(MenuItemStatus),
+        nullable=False,
+        default=MenuItemStatus.ACTIVE,
     )
 
     name: Mapped[str] = mapped_column(
@@ -105,6 +118,18 @@ class MenuItem(Base):
     )
 
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
@@ -186,6 +211,13 @@ class MenuItemImage(Base):
     )
 
 
+class MenuCategoryStatus(str, enum.Enum):
+
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+    DELETED = "DELETED"
+
+
 class MenuCategory(Base):
     __tablename__ = "menu_categories"
 
@@ -200,6 +232,12 @@ class MenuCategory(Base):
         ForeignKey("restaurants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+
+    status: Mapped[MenuCategoryStatus] = mapped_column(
+        Enum(MenuCategoryStatus),
+        nullable=False,
+        default=MenuCategoryStatus.ACTIVE,
     )
 
     name: Mapped[str] = mapped_column(
@@ -224,6 +262,11 @@ class MenuCategory(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
     )
