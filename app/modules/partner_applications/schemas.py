@@ -18,10 +18,13 @@ class PartnerApplicationCreate(BaseSchema):
 
 
 class PartnerApplicationCreateResponse(
-    PartnerApplicationCreate
+    BaseSchema
 ):  # only sending the response to the owner
 
     id: uuid.UUID
+    fssai_license_number: Annotated[str, Field(min_length=14, max_length=14)]
+    gst_number: Annotated[str, Field(min_length=15, max_length=15)]
+
     status: ApplicationStatus
     created_at: datetime
     # rejection_reason: Annotated[str | None, Field(max_length=500)]

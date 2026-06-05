@@ -19,9 +19,12 @@ class CreateMenuCategory(BaseSchema):
     display_order: Annotated[int, Field(ge=0, le=100)]
 
 
-class MenuCategoryCreateResponse(CreateMenuCategory):
+class MenuCategoryCreateResponse(BaseSchema):
 
     id: uuid.UUID
+    name: Annotated[str, Field(min_length=1, max_length=100)]
+    description: Annotated[str | None, Field(min_length=1, max_length=500)] = None
+    display_order: Annotated[int, Field(ge=0, le=100)]
     created_at: datetime
 
 

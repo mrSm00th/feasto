@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, Uuid, Index
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -81,11 +81,6 @@ class PartnerApplication(Base):
         back_populates="reviewed_applications",
     )
 
-
     __table_args__ = (
-        Index(
-            "idx_applicant_created_at",
-            applicant_id,
-            created_at.desc()
-        ),
+        Index("idx_applicant_created_at", applicant_id, created_at.desc()),
     )

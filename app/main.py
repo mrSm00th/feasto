@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 import app.db.models_registry
 from app.db.database import Base, engine, get_db
-from app.modules.admin import router as admins
+from app.modules.admins import router as admins
 from app.modules.menus import router as menus
 from app.modules.partner_applications import router as partner_applications
 from app.modules.restaurants import router as restaurants
