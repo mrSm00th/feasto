@@ -86,3 +86,29 @@ class RejectionReason(BaseSchema):
 class RevocationReason(BaseSchema):
 
     revocation_reason: Annotated[str, Field(min_length=10, max_length=500)]
+
+
+class PartnerApplicationHistory(BaseSchema):
+    id: uuid.UUID
+    status: ApplicationStatus
+    rejection_reason: str | None
+    created_at: datetime
+    reviewed_at: datetime | None
+
+
+class PartnerApplicationWithHistory(BaseSchema):
+    application: PartnerApplicationDetailed
+    history: list[PartnerApplicationHistory]
+
+
+class PendingCuisineRequestDetail(BaseSchema):
+
+    id: uuid.UUID
+    requested_by: uuid.UUID
+    cuisine_name: str
+    cuisine_slug: str
+    created_at: datetime
+    request_count: int
+
+    similar_approved_cuisines: list[ApprovedCuisineResponse]
+    similar_pending_cuisines: list[PendingCuisineRequest]

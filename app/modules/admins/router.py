@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,9 +18,10 @@ from app.modules.admins.schemas import (
     PaginatedApplicationResponse,
     PaginatedPendingCuisineResponse,
     PartnerApplicationAdminReview,
-    PartnerApplicationDetailed,
+    PartnerApplicationWithHistory,
     PendingApplicationsList,
     PendingCuisineRequest,
+    PendingCuisineRequestDetail,
     RejectionReason,
     RevocationReason,
 )
@@ -151,7 +152,7 @@ async def paginated_pending_applications(
 # route for all pending applications
 @router.get(
     "/owner-applications/{id}",
-    response_model=PartnerApplicationDetailed,
+    response_model=PartnerApplicationWithHistory,
     status_code=status.HTTP_200_OK,
 )
 async def onwer_application_detailed(
@@ -168,7 +169,30 @@ async def onwer_application_detailed(
 
     application = result.scalars().first()
 
-    return application
+    if not application:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+
+    history_result = await db.execute(
+        select(PartnerApplication)
+        .where(
+            PartnerApplication.applicant_id == application.applicant_id,
+            PartnerApplication.id != application.id,
+            PartnerApplication.status == ApplicationStatus.REJECTED,
+        )
+        .order_by(PartnerApplication.created_at.desc())
+        .limit(5)
+    )
+
+    history = history_result.scalars().all()
+
+    return PartnerApplicationWithHistory(
+        application=application,
+        history=history,
+    )
 
 
 @router.patch(
@@ -261,8 +285,106 @@ async def paginated_pending_cuisine_requests(
     )
 
 
+@router.get(
+    "/cuisines/{id}/pending",
+    response_model=PendingCuisineRequestDetail,
+)
+async def pending_cuisine_detailed_view(
+    id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: AsyncSession = Depends(get_db),
+):
+
+    result = await db.execute(select(CuisineRequest).where(CuisineRequest.id == id))
+
+    pending_cuisine = result.scalars().first()
+
+    if not pending_cuisine:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cuisine request not found",
+        )
+
+    words = pending_cuisine.cuisine_name.split()
+
+    condition = [word for word in words if len(word) > 3]
+
+    similar_approved_cuisines = []
+    similar_pending_cuisines = []
+    total_requests = 0
+
+    if condition:
+
+        result = await db.execute(
+            select(CuisineType)
+            .where(
+                CuisineType.status == CuisineStatus.ACTIVE,
+                or_(
+                    *[CuisineType.cuisine_name.ilike(f"%{word}%") for word in condition]
+                ),
+            )
+            .limit(10)
+        )
+
+        ## NOTE: use this query for production with postgres
+        # result = await db.execute(
+        #     select(CuisineType)
+        #     .where(CuisineType.status == CuisineStatus.PENDING)
+        #     .order_by(
+        #         func.similarity(CuisineType.cuisine_name, pending_cuisine.cuisine_name).desc()
+        #     )
+        # )
+
+        similar_approved_cuisines = result.scalars().all()
+
+        result = await db.execute(
+            select(CuisineRequest)
+            .where(
+                CuisineRequest.id != pending_cuisine.id,
+                or_(
+                    *[
+                        CuisineRequest.cuisine_name.ilike(f"%{word}%")
+                        for word in condition
+                    ]
+                ),
+            )
+            .limit(10)
+        )
+
+        ## NOTE: use this query for production with postgres
+        # result = await db.execute(
+        #     select(CuisineRequest)
+        #     .where(CuisinCuisineRequeste.id != pending_cuisine.id)
+        #     .order_by(
+        #         func.similarity(CuisineRequest.cuisine_name, pending_cuisine.cuisine_name).desc()
+        #     )
+        # )
+
+        similar_pending_cuisines = result.scalars().all()
+
+    result_count = await db.execute(
+        select(func.count())
+        .select_from(RestaurantCuisineMapping)
+        .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
+    )
+
+    total_requests = result_count.scalar() or 0
+
+    return {
+        "id": pending_cuisine.id,
+        "requested_by": pending_cuisine.requested_by,
+        "cuisine_name": pending_cuisine.cuisine_name,
+        "cuisine_slug": pending_cuisine.cuisine_slug,
+        "created_at": pending_cuisine.created_at,
+        "request_count": total_requests,
+        "similar_approved_cuisines": similar_approved_cuisines,
+        "similar_pending_cuisines": similar_pending_cuisines,
+    }
+
+
 @router.post(
-    "/pending-cuisine/{id}/approve",
+    "/cuisines/{id}/approve",
     response_model=ApprovedCuisineResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -375,8 +497,8 @@ async def approve_pending_cuisine(
     return new_cuisine
 
 
-@router.post(
-    "/pending-cuisines/{id}/reject",
+@router.patch(
+    "/cuisines/{id}/reject",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def reject_pending_cuisine(
@@ -466,7 +588,7 @@ async def reject_pending_cuisine(
 
 
 @router.patch(
-    "/cuisine/{id}/reject",
+    "/cuisines/{id}/revoke",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def revoke_approved_cuisine(
