@@ -492,6 +492,7 @@ class CuisineType(Base):
         nullable=True,
     )
 
+    # storing normalized name= name.strip().lower()
     cuisine_name: Mapped[str] = mapped_column(
         String(120),
         index=True,
@@ -558,7 +559,7 @@ class CuisineType(Base):
     revoker: Mapped["User"] = relationship(
         "User",
         foreign_keys=[revoked_by],
-        back_populates="approved_cuisines",
+        back_populates="revoked_cuisines",
     )
 
 
