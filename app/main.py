@@ -3,8 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-import app.db.models_registry
-from app.db.database import Base, engine, get_db
+from app.db.database import engine
 from app.modules.admins import router as admins
 from app.modules.menus import router as menus
 from app.modules.partner_applications import router as partner_applications
@@ -12,12 +11,12 @@ from app.modules.restaurants import router as restaurants
 from app.modules.users import router as users
 
 
+# generatings tables using alembic
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Startup
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield
+
     # Shutdown
     await engine.dispose()
 
