@@ -37,13 +37,12 @@ htmlcov/
 # Pytest
 .pytest_cache/
 
+# project specific ignores
 snippets.txt
 
 app/db/models.py
 
 app/routers.py
-
-snippits.py
 
 media
 

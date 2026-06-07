@@ -295,7 +295,7 @@ class RestaurantAvailability(Base):
     )
 
     status: Mapped[AvailabilityStatus] = mapped_column(
-        Enum(AvailabilityStatus, native_enum=False),
+        Enum(AvailabilityStatus),
         nullable=False,
     )
 
@@ -425,7 +425,6 @@ class RestaurantImage(Base):
             "restaurant_id",
             unique=True,
             postgresql_where=(is_primary == True),
-            sqlite_where=(is_primary == True),
         ),
     )
 
@@ -492,6 +491,7 @@ class CuisineType(Base):
         nullable=True,
     )
 
+    # storing normalized name= name.strip().lower()
     cuisine_name: Mapped[str] = mapped_column(
         String(120),
         index=True,
@@ -558,7 +558,7 @@ class CuisineType(Base):
     revoker: Mapped["User"] = relationship(
         "User",
         foreign_keys=[revoked_by],
-        back_populates="approved_cuisines",
+        back_populates="revoked_cuisines",
     )
 
 

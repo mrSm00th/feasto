@@ -34,7 +34,7 @@ class UserStatus(str, enum.Enum):
         "DEACTIVATED"  # user deactivaed their account, can be reactivated by user
     )
     SUSPENDED = (
-        "SUSPENDED "  # admin level action, can be reactivated by admin after review
+        "SUSPENDED"  # admin level action, can be reactivated by admin after review
     )
 
 
