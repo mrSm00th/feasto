@@ -295,7 +295,7 @@ class RestaurantAvailability(Base):
     )
 
     status: Mapped[AvailabilityStatus] = mapped_column(
-        Enum(AvailabilityStatus, native_enum=False),
+        Enum(AvailabilityStatus),
         nullable=False,
     )
 
@@ -425,7 +425,6 @@ class RestaurantImage(Base):
             "restaurant_id",
             unique=True,
             postgresql_where=(is_primary == True),
-            sqlite_where=(is_primary == True),
         ),
     )
 
