@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.db.database import engine
+from app.db.models_registry import load_models
 from app.modules.admins import router as admins
 from app.modules.menus import router as menus
 from app.modules.partner_applications import router as partner_applications
@@ -25,6 +26,8 @@ app = FastAPI(lifespan=lifespan)
 
 
 app.mount("/media", StaticFiles(directory="media"), name="media")
+
+load_models()
 
 
 app.include_router(users.router)
