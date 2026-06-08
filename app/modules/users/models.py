@@ -330,8 +330,9 @@ class Notification(Base):
         nullable=False,
     )
 
+    # treating it as a soft reference
     reference_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("cuisine_request_history.id"),
+        Uuid,
         nullable=False,
     )
 
