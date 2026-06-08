@@ -8,12 +8,14 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +72,11 @@ class MenuItem(Base):
     normalized_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+    )
+
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
     )
 
     description: Mapped[str | None] = mapped_column(
@@ -154,11 +161,23 @@ class MenuItem(Base):
         back_populates="menu_item",
     )
 
+    images: Mapped[list["MenuItemImage"]] = relationship(
+        back_populates="menu_item",
+        cascade="all, delete-orphan",
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "category_id",
             "normalized_name",
             name="uq_menu_item_category_normalized_name",
+        ),
+        UniqueConstraint(
+            "category_id",
+            "sort_order",
+            name="uq_category_id_sort_order",
+            deferrable=True,
+            initially="DEFERRED",
         ),
     )
 
@@ -171,12 +190,19 @@ class MenuItemImage(Base):
         Uuid,
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
+        server_default=text("gen_random_uuid()"),
     )
 
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("restaurants.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+
+    menu_item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("menu_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     image_url: Mapped[str] = mapped_column(
@@ -185,37 +211,61 @@ class MenuItemImage(Base):
     )
 
     image_type: Mapped[MenuItemImageType] = mapped_column(
-        Enum(MenuItemImageType),
+        Enum(MenuItemImageType, name="menuitemimagetype"),
+        nullable=False,
         default=MenuItemImageType.GALLERY,
     )
 
     sort_order: Mapped[int] = mapped_column(
         Integer,
-        default=0,
-    )
-
-    alt_text: Mapped[str] = mapped_column(
-        String(255),
         nullable=False,
+        default=1,
     )
 
-    is_primary: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
+    alt_text: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        nullable=False,
         default=lambda: datetime.now(UTC),
+        server_default=text("now()"),
     )
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=text("now()"),
         onupdate=lambda: datetime.now(UTC),
     )
 
+    # RELATIONSHIPS
+
     restaurant: Mapped["Restaurant"] = relationship(
         back_populates="menu_item_images",
+    )
+
+    menu_item: Mapped["MenuItem"] = relationship(
+        back_populates="images",
+    )
+
+    __table_args__ = (
+        # only one PRIMARY image per item
+        UniqueConstraint(
+            "menu_item_id",
+            "image_type",
+            name="uq_menu_item_primary_image",
+            # partial unique enforced at DB level via a partial index in migration
+            # since SQLAlchemy UniqueConstraint can't express WHERE clauses
+        ),
+        Index(
+            "ix_menu_item_images_item_sort",
+            "menu_item_id",
+            "sort_order",
+        ),
     )
 
 
@@ -264,14 +314,21 @@ class MenuCategory(Base):
         nullable=True,
     )
 
-    display_order: Mapped[int] = mapped_column(
+    sort_order: Mapped[int] = mapped_column(
         Integer,
-        default=0,
+        default=1,
     )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     archived_at: Mapped[datetime | None] = mapped_column(
@@ -288,10 +345,15 @@ class MenuCategory(Base):
     )
 
     __table_args__ = (
+        # prevents duplicate sort order for categoris
         UniqueConstraint(
             restaurant_id,
-            display_order,
+            sort_order,
+            deferrable=True,
+            initially="DEFERRED",
+            name="uq_category_restaurant_id_sort_order",
         ),
+        # prevent duplicate categories for a restaurant
         UniqueConstraint(
             restaurant_id,
             normalized_name,

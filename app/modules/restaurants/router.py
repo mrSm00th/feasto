@@ -6,10 +6,20 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
@@ -40,16 +50,22 @@ from app.modules.restaurants.schemas import (
     CreateCuisine,
     CuisineAdd,
     CuisineAddResponse,
+    CuisineListResponse,
     CuisineResponse,
     DayHoursResponse,
     DayHoursUpdate,
     RestaurantCreate,
     RestaurantCreateResponse,
+    RestaurantCuisineListResponse,
+    RestaurantCuisineRequestListResponse,
     RestaurantDocumentsUpload,
     RestaurantDocumentsUploadResponse,
     RestaurantHoursResponse,
     RestaurantHoursUpload,
     RestaurantImageUploadResponse,
+    RestaurantPendingCuisineItem,
+    RestaurantPrimaryCuisineResponse,
+    RestaurantPrimaryCuisneRequest,
     RestaurantPrimaryImageResponse,
 )
 from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
@@ -923,6 +939,8 @@ async def request_new_cuisine(
         )
 
     name = data.cuisine_name
+
+    # just text.split().lower()
     normalized_name = normalize_cuisine_name(name)
     slug = slugify(normalized_name)
 
@@ -990,6 +1008,126 @@ async def request_new_cuisine(
     await db.refresh(new_request)
 
     return new_request
+
+
+@router.patch(
+    "/{restaurant_id}/primary-cuisine",
+    response_model=RestaurantPrimaryCuisineResponse,
+)
+async def set_primary_cuisine_for_restaurant(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[
+        User,
+        Depends(require_roles(UserRole.RESTAURANT_OWNER)),
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    data: RestaurantPrimaryCuisneRequest,
+):
+
+    restaurant = await db.scalar(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not restaurant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.restaurant_id == restaurant_id,
+            RestaurantCuisineMapping.is_primary == True,
+        )
+    )
+
+    existing_primary_cuisine = result.scalars().first()
+
+    if existing_primary_cuisine:
+
+        if existing_primary_cuisine.cuisine_id == data.cuisine_id:
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Given cuisine type already uploaded as primary cuisine type.",
+            )
+
+        existing_primary_cuisine.is_primary = False
+
+        await db.flush()
+        # await db.delete(existing_primary_cuisine)
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.restaurant_id == restaurant_id,
+            RestaurantCuisineMapping.cuisine_id == data.cuisine_id,
+        )
+    )
+
+    existing_cuisine = result.scalars().first()
+
+    primary_cuisine_mapping = None
+
+    if existing_cuisine:
+
+        if existing_cuisine.status != MappedCuisineStatus.ACTIVE:
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pending Cuisine requests can't be set as primary cuisine.",
+            )
+
+        existing_cuisine.is_primary = True
+
+        primary_cuisine_mapping = existing_cuisine
+
+    else:
+
+        result = await db.execute(
+            select(CuisineType).where(
+                CuisineType.id == data.cuisine_id,
+                CuisineType.status == CuisineStatus.ACTIVE,
+            )
+        )
+
+        cuisine = result.scalars().first()
+
+        if not cuisine:
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Cuisine Type not found.",
+            )
+
+        new_primary_cuisine = RestaurantCuisineMapping(
+            restaurant_id=restaurant_id,
+            cuisine_id=cuisine.id,
+            status=MappedCuisineStatus.ACTIVE,
+            is_primary=True,
+        )
+        db.add(new_primary_cuisine)
+
+        primary_cuisine_mapping = new_primary_cuisine
+
+    try:
+
+        await db.commit()
+
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another primary cuisine is already set. Try again.",
+        ) from exc
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping)
+        .options(selectinload(RestaurantCuisineMapping.cuisine))
+        .where(RestaurantCuisineMapping.id == primary_cuisine_mapping.id)
+    )
+    return result.scalars().first()
 
 
 @router.patch(
@@ -1070,6 +1208,369 @@ async def upload_cuisine_for_restaurant(
         cuisine_id=cuisine.id,
         cuisine_name=cuisine.cuisine_name,
         cuisine_slug=cuisine.cuisine_slug,
-        cuisine_mapping_status=new_mapping.MappedCuisineStatus,
+        status=new_mapping.status,
         created_at=new_mapping.created_at,
     )
+
+
+# =========================
+# GET ALL APPROVED CUISINES
+# (browse catalog before adding)
+# =========================
+
+
+@router.get(
+    "/cuisines",
+    response_model=CuisineListResponse,
+)
+async def get_all_approved_cuisines(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page,
+):
+    """
+    Returns all ACTIVE approved cuisines.
+    Used by the owner to browse and pick cuisines to add to their restaurant.
+    Supports optional fuzzy name search.
+    """
+    base_query = select(CuisineType).where(CuisineType.status == CuisineStatus.ACTIVE)
+
+    if search:
+        normalized_search = normalize_cuisine_name(search)
+        base_query = base_query.where(
+            CuisineType.cuisine_name.ilike(f"%{normalized_search}%")
+        )
+
+    count_result = await db.scalar(
+        select(func.count()).select_from(base_query.subquery())
+    )
+    total = count_result or 0
+
+    result = await db.execute(
+        base_query.order_by(CuisineType.cuisine_name.asc()).offset(skip).limit(limit)
+    )
+    cuisines = result.scalars().all()
+
+    return CuisineListResponse(
+        cuisines=cuisines,
+        total=total,
+        skip=skip,
+        limit=limit,
+        has_more=skip + limit < total,
+    )
+
+
+# =========================
+# GET ALL CUISINES FOR A RESTAURANT
+# (mapped cuisines — both active and pending)
+# =========================
+
+
+@router.get(
+    "/{restaurant_id}/cuisines",
+    response_model=RestaurantCuisineListResponse,
+)
+async def get_cuisines_for_restaurant(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Returns all cuisine mappings for a restaurant — active and pending.
+    Loads the related CuisineType and CuisineRequest eagerly to avoid N+1.
+    """
+    result = await db.execute(
+        select(Restaurant.id).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping)
+        .options(
+            selectinload(RestaurantCuisineMapping.cuisine),
+        )
+        .where(RestaurantCuisineMapping.restaurant_id == restaurant_id)
+        .order_by(
+            RestaurantCuisineMapping.is_primary.desc(),
+            RestaurantCuisineMapping.created_at.asc(),
+        )
+    )
+    mappings = result.scalars().all()
+
+    return RestaurantCuisineListResponse(
+        cuisines=mappings,
+        total=len(mappings),
+        restaurant_id=restaurant_id,
+    )
+
+
+# =========================
+# GET ALL PENDING CUISINE REQUESTS
+# FOR A RESTAURANT
+# =========================
+
+
+@router.get(
+    "/{restaurant_id}/cuisine/requests",
+    response_model=RestaurantCuisineRequestListResponse,
+)
+async def get_pending_cuisine_requests_for_restaurant(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Returns all PENDING_REVIEW cuisine mappings for a restaurant,
+    joined with the underlying CuisineRequest for name/slug details.
+    """
+    result = await db.execute(
+        select(Restaurant.id).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping, CuisineRequest)
+        .join(
+            CuisineRequest,
+            RestaurantCuisineMapping.request_id == CuisineRequest.id,
+        )
+        .where(
+            RestaurantCuisineMapping.restaurant_id == restaurant_id,
+            RestaurantCuisineMapping.status == MappedCuisineStatus.PENDING_REVIEW,
+        )
+        .order_by(RestaurantCuisineMapping.created_at.asc())
+    )
+    rows = result.all()
+
+    return RestaurantCuisineRequestListResponse(
+        requests=[
+            RestaurantPendingCuisineItem(
+                mapping_id=mapping.id,
+                request_id=request.id,
+                cuisine_name=request.cuisine_name,
+                cuisine_slug=request.cuisine_slug,
+                status=mapping.status,
+                is_primary=mapping.is_primary,
+                created_at=mapping.created_at,
+            )
+            for mapping, request in rows
+        ],
+        total=len(rows),
+        restaurant_id=restaurant_id,
+    )
+
+
+# =========================
+# REMOVE AN APPROVED CUISINE
+# FROM RESTAURANT
+# =========================
+
+
+@router.delete(
+    "/{restaurant_id}/cuisine/{mapping_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_cuisine_from_restaurant(
+    restaurant_id: uuid.UUID,
+    mapping_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Removes an approved cuisine mapping from a restaurant.
+    Cannot remove a primary cuisine — demote it first via PATCH /primary-cuisine.
+    Cannot remove a pending cuisine — cancel via DELETE /cuisine/request/{mapping_id}.
+    """
+    result = await db.execute(
+        select(Restaurant.id).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.id == mapping_id,
+            RestaurantCuisineMapping.restaurant_id == restaurant_id,
+        )
+    )
+    mapping = result.scalars().first()
+
+    if not mapping:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cuisine mapping not found for this restaurant.",
+        )
+
+    if mapping.status == MappedCuisineStatus.PENDING_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot remove a pending cuisine. Cancel the request instead via DELETE /cuisine/request/{mapping_id}.",
+        )
+
+    if mapping.is_primary:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot remove the primary cuisine. Set a different primary cuisine first.",
+        )
+
+    await db.delete(mapping)
+
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to remove cuisine.",
+        ) from exc
+
+
+# =========================
+# CANCEL A PENDING CUISINE REQUEST
+# =========================
+
+
+@router.delete(
+    "/{restaurant_id}/cuisine/request/{mapping_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def cancel_pending_cuisine_request(
+    restaurant_id: uuid.UUID,
+    mapping_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Cancels a pending cuisine request for a restaurant by removing
+    the mapping row. Does NOT delete the underlying CuisineRequest —
+    other restaurants may have mapped to the same request.
+    Only works on PENDING_REVIEW mappings.
+    """
+    result = await db.execute(
+        select(Restaurant.id).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.id == mapping_id,
+            RestaurantCuisineMapping.restaurant_id == restaurant_id,
+        )
+    )
+    mapping = result.scalars().first()
+
+    if not mapping:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cuisine request mapping not found for this restaurant.",
+        )
+
+    if mapping.status != MappedCuisineStatus.PENDING_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only pending cuisine requests can be cancelled. Use DELETE /cuisine/{mapping_id} for approved cuisines.",
+        )
+
+    if mapping.is_primary:
+        # defensive — pending cuisines shouldn't be primary, but guard it
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot cancel a primary cuisine mapping.",
+        )
+
+    await db.delete(mapping)
+
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cancel cuisine request.",
+        ) from exc
+
+
+# =========================
+# DEMOTE PRIMARY CUISINE
+# (unset is_primary without removing)
+# =========================
+
+
+@router.delete(
+    "/{restaurant_id}/primary-cuisine",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def demote_primary_cuisine(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Unsets the primary cuisine flag for a restaurant without removing the mapping.
+    Use this before removing the primary cuisine or reassigning a new one.
+    """
+    result = await db.execute(
+        select(Restaurant.id).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+    if not result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner.",
+        )
+
+    result = await db.execute(
+        select(RestaurantCuisineMapping).where(
+            RestaurantCuisineMapping.restaurant_id == restaurant_id,
+            RestaurantCuisineMapping.is_primary == True,
+        )
+    )
+    primary_mapping = result.scalars().first()
+
+    if not primary_mapping:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No primary cuisine set for this restaurant.",
+        )
+
+    primary_mapping.is_primary = False
+
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to demote primary cuisine.",
+        ) from exc

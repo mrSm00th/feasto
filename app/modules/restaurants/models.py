@@ -598,6 +598,11 @@ class RestaurantCuisineMapping(Base):
         nullable=True,
     )
 
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
     status: Mapped[MappedCuisineStatus] = mapped_column(
         Enum(MappedCuisineStatus),
         default=MappedCuisineStatus.PENDING_REVIEW,
@@ -647,6 +652,14 @@ class RestaurantCuisineMapping(Base):
             name="uq_restaurant_request",
         ),
     )
+
+
+Index(
+    "uq_restaurant_one_primary_cuisine",
+    RestaurantCuisineMapping.restaurant_id,
+    unique=True,
+    postgresql_where=RestaurantCuisineMapping.is_primary.is_(True),
+)
 
 
 # NOTE - only pending requests live here
