@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
+from asyncio import gather
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated, List
 
 from fastapi import (
@@ -32,6 +33,7 @@ from app.core.image_processing import ImageProcessingError, _image_key, process_
 from app.core.storage import StorageBackend, _cleanup_keys, get_storage
 from app.db.database import get_db
 from app.modules.restaurants.models import (
+    AvailabilityStatus,
     CuisineRequest,
     CuisineStatus,
     CuisineType,
@@ -54,6 +56,7 @@ from app.modules.restaurants.schemas import (
     CuisineResponse,
     DayHoursResponse,
     DayHoursUpdate,
+    RestaurantByCityPaginatedResponse,
     RestaurantCreate,
     RestaurantCreateResponse,
     RestaurantCuisineListResponse,
@@ -63,10 +66,12 @@ from app.modules.restaurants.schemas import (
     RestaurantHoursResponse,
     RestaurantHoursUpload,
     RestaurantImageUploadResponse,
+    RestaurantPauseSchema,
     RestaurantPendingCuisineItem,
     RestaurantPrimaryCuisineResponse,
     RestaurantPrimaryCuisneRequest,
     RestaurantPrimaryImageResponse,
+    RestaurantSchema,
 )
 from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
     _build_availability_rows,
@@ -106,6 +111,8 @@ async def create_restaurant_draft(
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+
+    # normalize = strip().lower()
     normalized_name = normalize(data.name)
     normalized_address_line_1 = normalize(data.address_line_1)
     normalized_city = normalize(data.city)
@@ -667,9 +674,9 @@ async def delete_restaurant(
     status_code=status.HTTP_201_CREATED,
     summary="Set restaurant hours (onboarding)",
     description=(
-        "Upserts the weekly availability schedule. Safe to call multiple times "
-        "during onboarding — existing shifts for submitted days are overwritten. "
-        "Days not included in the payload are left untouched."
+        "Sets the full weekly availability schedule. "
+        "All 7 days must be provided — existing schedule is replaced entirely. "
+        "Use PATCH /{restaurant_id}/hours/{day} to update a single day after onboarding."
     ),
 )
 async def create_restaurant_hours(
@@ -678,30 +685,36 @@ async def create_restaurant_hours(
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await _get_owned_restaurant(restaurant_id, current_user.id, db)
+    restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
 
-    rows = _build_availability_rows(restaurant_id, data.hours)
-
-    dialect_insert = _get_upsert_fn()
-
-    stmt = dialect_insert(RestaurantAvailability).values(rows)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["restaurant_id", "day_of_week", "shift_index"],
-        set_={
-            "status": stmt.excluded.status,
-            "opening_time": stmt.excluded.opening_time,
-            "closing_time": stmt.excluded.closing_time,
-            "updated_at": datetime.now(UTC),
-        },
+    # delete all existing shifts for this restaurant — full replacement
+    await db.execute(
+        delete(RestaurantAvailability).where(
+            RestaurantAvailability.restaurant_id == restaurant_id
+        )
     )
 
+    new_rows = [
+        RestaurantAvailability(
+            restaurant_id=restaurant_id,
+            day_of_week=shift.day_of_week,
+            status=shift.status,
+            opening_time=shift.opening_time,
+            closing_time=shift.closing_time,
+            shift_index=shift.shift_index,
+        )
+        for shift in data.hours
+    ]
+
+    db.add_all(new_rows)
+    restaurant.status = RestaurantStatus.TIMINGS_ADDED
+
     try:
-        await db.execute(stmt)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         logger.warning(
-            "Hours upsert integrity error for restaurant %s: %s", restaurant_id, exc
+            "Hours insert integrity error for restaurant %s: %s", restaurant_id, exc
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -800,16 +813,107 @@ async def update_day_hours(
 # Temporarily close the restaurant
 
 
+# ── MANUAL PAUSE ──────────────────────────────────────────
+
+
+@router.patch(
+    "/{restaurant_id}/pause",
+    response_model=RestaurantSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Pause order intake immediately",
+    description="Instantly hides the restaurant from customers. No end date — owner must resume manually.",
+)
+async def pause_restaurant(
+    restaurant_id: uuid.UUID,
+    data: RestaurantPauseSchema,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
+
+    if restaurant.status != RestaurantStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active restaurants can be paused.",
+        )
+    if restaurant.is_manually_paused:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Restaurant is already paused.",
+        )
+
+    restaurant.is_manually_paused = True
+    restaurant.pause_reason = data.reason
+    restaurant.paused_at = datetime.now(UTC)
+
+    try:
+        await db.commit()
+        await db.refresh(restaurant)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to pause restaurant.",
+        ) from exc
+
+    return restaurant
+
+
+@router.patch(
+    "/{restaurant_id}/resume",
+    response_model=RestaurantSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Resume order intake",
+    description="Makes the restaurant visible to customers again after a manual pause.",
+)
+async def resume_restaurant(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
+
+    if restaurant.status != RestaurantStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active restaurants can be resumed.",
+        )
+    if not restaurant.is_manually_paused:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Restaurant is not paused.",
+        )
+
+    restaurant.is_manually_paused = False
+    restaurant.pause_reason = None
+    restaurant.paused_at = None
+
+    try:
+        await db.commit()
+        await db.refresh(restaurant)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resume restaurant.",
+        ) from exc
+
+    return restaurant
+
+
+# ── PLANNED CLOSURE ───────────────────────────────────────
+
+
 @router.post(
     "/{restaurant_id}/closure",
     response_model=ClosureResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Temporarily close a restaurant",
+    summary="Schedule a planned closure",
     description=(
-        "Creates a closure event. The restaurant is immediately hidden from "
-        "customers and no new orders can be placed. "
-        "ends_at=null means indefinite — call DELETE /closure to reopen. "
-        "ends_at set to a future datetime schedules an automatic reopen."
+        "Creates a planned closure starting from midnight today (UTC). "
+        "end_date is the last day of closure (inclusive) — restaurant reopens at midnight after that date. "
+        "end_date=null means indefinite — call DELETE /closure to reopen. "
+        "Does NOT affect is_manually_paused."
     ),
 )
 async def create_closure(
@@ -820,38 +924,49 @@ async def create_closure(
 ):
     restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
 
+    if restaurant.status != RestaurantStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active restaurants can have closures.",
+        )
+
     now = datetime.now(UTC)
-    existing_closure = await db.scalar(
+
+    # starts_at — midnight of today in UTC
+    # owner clicks the button today, closure starts from the beginning of today
+    starts_at = datetime.combine(now.date(), time.min, tzinfo=UTC)
+
+    # ends_at — midnight of the day AFTER end_date (exclusive upper bound)
+    # "closed until June 25" means visible again at 00:00 June 26
+    ends_at = (
+        datetime.combine(data.end_date, time.min, tzinfo=UTC) + timedelta(days=1)
+        if data.end_date is not None
+        else None
+    )
+
+    existing = await db.scalar(
         select(RestaurantClosure).where(
             RestaurantClosure.restaurant_id == restaurant_id,
-            RestaurantClosure.starts_at <= now,
             (RestaurantClosure.ends_at.is_(None)) | (RestaurantClosure.ends_at > now),
         )
     )
-    if existing_closure:
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Restaurant already has an active closure. "
-                "Call DELETE /closure to remove it before creating a new one."
-            ),
+            detail="An active closure already exists. Remove it before creating a new one.",
         )
 
     closure = RestaurantClosure(
         restaurant_id=restaurant_id,
         reason=data.reason,
-        starts_at=data.starts_at,
-        ends_at=data.ends_at,
+        starts_at=starts_at,
+        ends_at=ends_at,
     )
-
-    restaurant.is_manually_closed = True
-
     db.add(closure)
-    db.add(restaurant)
 
     try:
         await db.commit()
-    except IntegrityError as exc:
+    except Exception as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -862,17 +977,12 @@ async def create_closure(
     return closure
 
 
-# DELETE /{restaurant_id}/closure
-# Reopen the restaurant (remove the active closure)
-
-
 @router.delete(
     "/{restaurant_id}/closure",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Reopen a temporarily closed restaurant",
+    summary="Cancel an active planned closure",
     description=(
-        "Removes the active closure event and marks the restaurant as open. "
-        "Returns 404 if there is no active closure."
+        "Removes the active closure record. " "Does NOT affect is_manually_paused."
     ),
 )
 async def delete_closure(
@@ -880,17 +990,16 @@ async def delete_closure(
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
+    await _get_owned_restaurant(restaurant_id, current_user.id, db)
 
     now = datetime.now(UTC)
+
     active_closure = await db.scalar(
         select(RestaurantClosure).where(
             RestaurantClosure.restaurant_id == restaurant_id,
-            RestaurantClosure.starts_at <= now,
             (RestaurantClosure.ends_at.is_(None)) | (RestaurantClosure.ends_at > now),
         )
     )
-
     if not active_closure:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -899,12 +1008,9 @@ async def delete_closure(
 
     await db.delete(active_closure)
 
-    restaurant.is_manually_closed = False
-    db.add(restaurant)
-
     try:
         await db.commit()
-    except IntegrityError as exc:
+    except Exception as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1228,7 +1334,9 @@ async def get_all_approved_cuisines(
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     search: Annotated[str | None, Query(max_length=100)] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page,
+    limit: Annotated[
+        int, Query(ge=1, le=100)
+    ] = settings.approved_cuisine_names_per_page,
 ):
     """
     Returns all ACTIVE approved cuisines.
@@ -1574,3 +1682,152 @@ async def demote_primary_cuisine(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to demote primary cuisine.",
         ) from exc
+
+
+@router.get("/", response_model=RestaurantByCityPaginatedResponse)
+async def get_all_restaurants_for_city(
+    city: Annotated[str, Query(min_length=2, max_length=50)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.restaurants_per_page,
+):
+    now = datetime.now(UTC)
+    current_time = now.time().replace(tzinfo=None)
+    today_dow = now.isoweekday() % 7  # convert to 0=Monday..6=Sunday
+
+    normalized = normalize(city)  # same normalize() used at creation time
+
+    # restaurants under active planned closure right now
+    active_closure_subquery = (
+        select(RestaurantClosure.restaurant_id)
+        .where(
+            RestaurantClosure.starts_at <= now,
+            (RestaurantClosure.ends_at.is_(None)) | (RestaurantClosure.ends_at > now),
+        )
+        .scalar_subquery()
+    )
+
+    filters = [
+        Restaurant.normalized_city
+        == normalized,  # correct: normalized input vs normalized column
+        Restaurant.status == RestaurantStatus.ACTIVE,
+        Restaurant.is_manually_paused.is_(False),  # manual pause check
+        Restaurant.id.not_in(active_closure_subquery),  # planned closure check
+        RestaurantAvailability.restaurant_id == Restaurant.id,
+        RestaurantAvailability.day_of_week == today_dow,
+        RestaurantAvailability.status == AvailabilityStatus.OPEN,
+        RestaurantAvailability.opening_time <= current_time,
+        RestaurantAvailability.closing_time > current_time,
+    ]
+
+    count_query = (
+        select(func.count(Restaurant.id))
+        .join(
+            RestaurantAvailability,
+            RestaurantAvailability.restaurant_id == Restaurant.id,
+        )
+        .where(*filters)
+    )
+
+    data_query = (
+        select(Restaurant)
+        .join(
+            RestaurantAvailability,
+            RestaurantAvailability.restaurant_id == Restaurant.id,
+        )
+        .options(
+            selectinload(Restaurant.primary_image),
+            selectinload(Restaurant.restaurant_cuisines).selectinload(
+                RestaurantCuisineMapping.cuisine
+            ),
+        )
+        .where(*filters)
+        .order_by(Restaurant.avg_rating.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    total, data_result = await gather(
+        db.scalar(count_query),
+        db.execute(data_query),
+    )
+
+    restaurants = data_result.scalars().all()
+
+    return RestaurantByCityPaginatedResponse(
+        restaurants=restaurants,
+        total=total or 0,
+        skip=skip,
+        limit=limit,
+        has_more=skip + len(restaurants) < (total or 0),
+    )
+
+
+@router.post(
+    "/{restaurant_id}/activate",
+)
+async def activate_restaurant(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    result = await db.execute(
+        select(Restaurant).where(
+            Restaurant.owner_id == current_user.id,
+            Restaurant.id == restaurant_id,
+        )
+    )
+
+    restaurant = result.scalars().first()
+
+    if not restaurant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="restaurant not found for this owner",
+        )
+
+    if restaurant.status != RestaurantStatus.MENU_ADDED:
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Added atleast a menu item to activate the restaurant",
+        )
+
+    restaurant.status = RestaurantStatus.ACTIVE
+    restaurant.is_activated = True
+    restaurant.activated_at = datetime.now(UTC)
+
+    try:
+        await db.commit()
+        await db.refresh(restaurant)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to activate the restaurant.",
+        ) from exc
+
+    return restaurant
+
+
+@router.get(
+    "/{restaurant_id}",
+)
+async def get_detailed_restaurant_by_id(
+    restaurant_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    result = await db.execute(
+        select(Restaurant)
+        .options(selectinload(Restaurant.primary_image))
+        .where(
+            Restaurant.id == restaurant_id,
+        )
+    )
+
+    restaurant = result.scalars().first()
+
+    return restaurant

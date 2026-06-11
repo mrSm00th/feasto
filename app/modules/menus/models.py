@@ -23,14 +23,7 @@ from app.db.database import Base
 from app.modules.restaurants.models import VegType
 
 
-class MenuItemImageType(str, enum.Enum):
-    PRIMARY = "PRIMARY"  # main image shown in UI
-    GALLERY = "GALLERY"  # additional images
-    THUMBNAIL = "THUMBNAIL"  # small preview (optional)
-
-
 class MenuItemStatus(str, enum.Enum):
-
     ACTIVE = "ACTIVE"
     ARCHIVED = "ARCHIVED"
     DELETED = "DELETED"
@@ -94,11 +87,6 @@ class MenuItem(Base):
         nullable=True,
     )
 
-    image_url: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
     veg_type: Mapped[VegType] = mapped_column(
         Enum(VegType),
         default=VegType.VEG,
@@ -143,7 +131,7 @@ class MenuItem(Base):
         nullable=True,
     )
 
-    # RELATIONSHIP
+    # RELATIONSHIPS
 
     restaurant: Mapped["Restaurant"] = relationship(
         back_populates="menu_items",
@@ -161,9 +149,12 @@ class MenuItem(Base):
         back_populates="menu_item",
     )
 
-    images: Mapped[list["MenuItemImage"]] = relationship(
+    # one-to-one: a MenuItem has at most one MenuItemImage
+    # uselist=False makes SQLAlchemy treat this as a scalar, not a list
+    image: Mapped["MenuItemImage | None"] = relationship(
         back_populates="menu_item",
         cascade="all, delete-orphan",
+        uselist=False,
     )
 
     __table_args__ = (
@@ -183,7 +174,6 @@ class MenuItem(Base):
 
 
 class MenuItemImage(Base):
-
     __tablename__ = "menu_item_images"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -208,18 +198,6 @@ class MenuItemImage(Base):
     image_url: Mapped[str] = mapped_column(
         Text,
         nullable=False,
-    )
-
-    image_type: Mapped[MenuItemImageType] = mapped_column(
-        Enum(MenuItemImageType, name="menuitemimagetype"),
-        nullable=False,
-        default=MenuItemImageType.GALLERY,
-    )
-
-    sort_order: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=1,
     )
 
     alt_text: Mapped[str | None] = mapped_column(
@@ -249,28 +227,23 @@ class MenuItemImage(Base):
     )
 
     menu_item: Mapped["MenuItem"] = relationship(
-        back_populates="images",
+        back_populates="image",
     )
 
     __table_args__ = (
-        # only one PRIMARY image per item
+        # enforces exactly one image per menu item at the DB level
         UniqueConstraint(
             "menu_item_id",
-            "image_type",
-            name="uq_menu_item_primary_image",
-            # partial unique enforced at DB level via a partial index in migration
-            # since SQLAlchemy UniqueConstraint can't express WHERE clauses
+            name="uq_menu_item_image",
         ),
         Index(
-            "ix_menu_item_images_item_sort",
-            "menu_item_id",
-            "sort_order",
+            "ix_menu_item_images_restaurant",
+            "restaurant_id",
         ),
     )
 
 
 class MenuCategoryStatus(str, enum.Enum):
-
     ACTIVE = "ACTIVE"
     ARCHIVED = "ARCHIVED"
     DELETED = "DELETED"
@@ -308,7 +281,6 @@ class MenuCategory(Base):
         nullable=False,
     )
 
-    # optional description
     description: Mapped[str | None] = mapped_column(
         String(350),
         nullable=True,
@@ -345,7 +317,6 @@ class MenuCategory(Base):
     )
 
     __table_args__ = (
-        # prevents duplicate sort order for categoris
         UniqueConstraint(
             restaurant_id,
             sort_order,
@@ -353,7 +324,6 @@ class MenuCategory(Base):
             initially="DEFERRED",
             name="uq_category_restaurant_id_sort_order",
         ),
-        # prevent duplicate categories for a restaurant
         UniqueConstraint(
             restaurant_id,
             normalized_name,
