@@ -155,46 +155,55 @@ async def create_menu_category(
     return new_menu_category
 
 
-@router.get("/{restaurant_id}/menu-categories", response_model=MenuCategoryListResponse)
-async def get_all_menu_categories_for_restaurant(
+# restaurant owner's path to view all the menu categories of his restaurant
+@router.get(
+    "/{restaurant_id}/menu-categories/manage",
+    response_model=MenuCategoryListResponse,
+)
+async def get_all_menu_categories_owner_view(
     restaurant_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_categories_per_page,
 ):
-
     result = await db.execute(
         select(Restaurant.id).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-
-    restaurant = result.scalars().first()
-
-    if not restaurant:
-
+    if not result.scalars().first():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Restaurant not found for this owner",
         )
 
+    base_where = [
+        MenuCategory.restaurant_id == restaurant_id,
+        MenuCategory.status.in_(
+            [MenuCategoryStatus.ACTIVE, MenuCategoryStatus.ARCHIVED]
+        ),
+    ]
+
+    total = await db.scalar(select(func.count(MenuCategory.id)).where(*base_where))
+
     result = await db.execute(
         select(MenuCategory)
-        .where(
-            MenuCategory.restaurant_id == restaurant_id,
-            MenuCategory.status.in_(
-                [MenuCategoryStatus.ACTIVE, MenuCategoryStatus.ARCHIVED],
-            ),
-        )
+        .where(*base_where)
         .order_by(MenuCategory.sort_order.asc())
+        .offset(skip)
+        .limit(limit)
     )
-
     menu_categories = result.scalars().all()
 
     return MenuCategoryListResponse(
         menu_categories=menu_categories,
-        total_categories=len(menu_categories),
+        total_categories=total or 0,
         restaurant_id=restaurant_id,
+        skip=skip,
+        limit=limit,
+        has_more=skip + len(menu_categories) < (total or 0),
     )
 
 
@@ -218,6 +227,21 @@ async def create_menu_item(
     data: MenuItemCreate,
 ):
 
+    result = await db.execute(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+
+    restaurant = result.scalars().first()
+
+    if not restaurant:
+
+        raise HTTPException(
+            staus_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found"
+        )
+
     # =========================
     # VERIFY CATEGORY BELONGS TO
     # THE OWNER AND RESTAURANT
@@ -232,20 +256,12 @@ async def create_menu_item(
         )
     )
 
-    try:
-        category = result.scalar_one()
+    category = result.scalar_one_or_none()
 
-    except NoResultFound:
+    if not category:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Menu category not found",
-        )
-
-    # just a Defensive check against data corruption
-    except MultipleResultsFound:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Data integrity error: multiple categories found.",
         )
 
     normalized_name = normalize(data.name)
@@ -255,7 +271,7 @@ async def create_menu_item(
     # WITHIN CATEGORY
     # =========================
     result = await db.execute(
-        select(MenuItem.id).where(
+        select(MenuItem).where(
             MenuItem.category_id == category_id,
             MenuItem.normalized_name == normalized_name,
         )
@@ -306,6 +322,10 @@ async def create_menu_item(
     )
 
     db.add(new_item)
+
+    if restaurant.status != RestaurantStatus.MENU_ADDED:
+
+        restaurant.status = RestaurantStatus.MENU_ADDED
 
     try:
         await db.commit()
@@ -743,10 +763,10 @@ async def reorder_menu_categories(
 
 
 @router.get(
-    "/{restaurant_id}/menu-categories/{category_id}/items",
+    "/{restaurant_id}/menu-categories/{category_id}/items/manage",
     response_model=MenuItemPaginatedResponse,
 )
-async def get_all_menu_items_for_category_paginated(
+async def get_all_menu_items_for_category_paginated_owner_view(
     restaurant_id: uuid.UUID,
     category_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
@@ -1578,19 +1598,19 @@ async def delete_menu_item(
         ) from exc
 
 
+# Customer/public view — no auth
 @router.get(
     "/{restaurant_id}/menu-categories",
     response_model=MenuCategoryPaginatedResponse,
     status_code=status.HTTP_200_OK,
     summary="List active menu categories for a restaurant (customer view)",
 )
-async def get_all_menu_categories_for_restaurant(
+async def get_all_menu_categories_customer_view(
     restaurant_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_categories_per_page,
 ):
-    # verify restaurant exists and is active
     restaurant_exists = await db.scalar(
         select(Restaurant.id).where(
             Restaurant.id == restaurant_id,
@@ -1617,7 +1637,6 @@ async def get_all_menu_categories_for_restaurant(
         .offset(skip)
         .limit(limit)
     )
-
     categories = result.scalars().all()
 
     return MenuCategoryPaginatedResponse(
@@ -1643,8 +1662,7 @@ async def get_all_menu_items_for_category(
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_items_per_page,
 ):
-    # verify category belongs to this restaurant and is active
-    # single query — if category doesn't exist or belongs to a different restaurant, 404
+
     category_exists = await db.scalar(
         select(MenuCategory.id).where(
             MenuCategory.id == category_id,
@@ -1652,6 +1670,7 @@ async def get_all_menu_items_for_category(
             MenuCategory.status == MenuCategoryStatus.ACTIVE,
         )
     )
+
     if not category_exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

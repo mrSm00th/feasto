@@ -141,10 +141,12 @@ class MenuCategorySchema(BaseSchema):
 
 # list response to show all menu categories
 class MenuCategoryListResponse(BaseSchema):
-
     menu_categories: list[MenuCategorySchema]
     total_categories: int
     restaurant_id: uuid.UUID
+    skip: int
+    limit: int
+    has_more: bool
 
 
 # schema to get all the menu items under a category

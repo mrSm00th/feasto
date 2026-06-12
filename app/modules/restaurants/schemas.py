@@ -355,7 +355,7 @@ class RestaurantPrimaryImageResponse(BaseSchema):
 
 class RestaurantPrimaryImageSchema(BaseSchema):
     id: uuid.UUID
-    image_path: str  # resolved to public URL at route level
+    image_url: str  # resolved to public URL at route level
 
 
 class RestaurantSchema(BaseSchema):

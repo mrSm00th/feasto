@@ -1389,6 +1389,8 @@ async def get_cuisines_for_restaurant(
     Returns all cuisine mappings for a restaurant — active and pending.
     Loads the related CuisineType and CuisineRequest eagerly to avoid N+1.
     """
+
+    # 1. ceck if restaurat exists
     result = await db.execute(
         select(Restaurant.id).where(
             Restaurant.id == restaurant_id,
@@ -1401,6 +1403,7 @@ async def get_cuisines_for_restaurant(
             detail="Restaurant not found for this owner.",
         )
 
+    # 2. fetch all cusisnes mapped for the asked restaurant
     result = await db.execute(
         select(RestaurantCuisineMapping)
         .options(
@@ -1692,8 +1695,8 @@ async def get_all_restaurants_for_city(
     limit: Annotated[int, Query(ge=1, le=100)] = settings.restaurants_per_page,
 ):
     now = datetime.now(UTC)
-    current_time = now.time().replace(tzinfo=None)
-    today_dow = now.isoweekday() % 7  # convert to 0=Monday..6=Sunday
+    current_time = now.astimezone(UTC).timetz()  # aware time in UTC, matches DB's +00
+    today_dow = now.isoweekday() - 1  # 0=Monday..6=Sunday
 
     normalized = normalize(city)  # same normalize() used at creation time
 
@@ -1747,10 +1750,8 @@ async def get_all_restaurants_for_city(
         .limit(limit)
     )
 
-    total, data_result = await gather(
-        db.scalar(count_query),
-        db.execute(data_query),
-    )
+    total = await db.scalar(count_query)
+    data_result = await db.execute(data_query)
 
     restaurants = data_result.scalars().all()
 
