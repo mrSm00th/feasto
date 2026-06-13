@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.carts.models import Cart, CartItem
@@ -16,9 +17,14 @@ from app.modules.carts.schemas import (
     CartItemRemoveSchema,
     CartItemResponseSchema,
     CartResponseSchema,
+    CartCheckoutSchema,
+    OrderResponseSchema,
 )
-from app.modules.menus.models import MenuItem, MenuItemStatus
-from app.modules.users.models import User, UserRole
+from app.modules.menus.models import MenuItem, MenuItemStatus, MenuItemStatus
+from app.modules.orders.services import create_order_from_cart
+from app.modules.payments.models import PaymentProvider
+from app.modules.restaurants.models import Restaurant, RestaurantStatus
+from app.modules.users.models import Address, User, UserRole
 
 router = APIRouter(prefix="/cart", tags=["cart"])
 
@@ -388,3 +394,107 @@ async def clear_cart(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to clear cart")
+
+
+@router.post("/checkout", response_model=OrderResponseSchema, status_code=status.HTTP_201_CREATED)
+async def checkout(
+    data: CartCheckoutSchema,
+    current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    # 1. Fetch cart
+    result = await db.execute(
+        select(Cart)
+        .options(selectinload(Cart.items))
+        .where(Cart.user_id == current_user.id)
+    )
+    user_cart = result.scalar_one_or_none()
+
+    if not user_cart or not user_cart.items:
+        raise HTTPException(status_code=400, detail="Your cart is empty")
+
+    cart_item_menu_ids = [item.menu_item_id for item in user_cart.items]
+
+    # 2. Validate restaurant
+    result = await db.execute(
+        select(Restaurant).where(
+            Restaurant.id == user_cart.restaurant_id,
+            Restaurant.status == RestaurantStatus.ACTIVE,
+            Restaurant.is_manually_paused == False,
+        )
+    )
+    restaurant = result.scalar_one_or_none()
+
+    if not restaurant:
+        raise HTTPException(status_code=409, detail="This restaurant is no longer accepting orders")
+
+    # 3. Validate address
+    result = await db.execute(
+        select(Address).where(
+            Address.id == data.address_id,
+            Address.user_id == current_user.id,
+        )
+    )
+    address = result.scalar_one_or_none()
+
+    if not address:
+        raise HTTPException(status_code=404, detail="Address not found")
+
+    # 4. Fetch menu items
+    result = await db.execute(
+        select(MenuItem).where(
+            MenuItem.id.in_(cart_item_menu_ids),
+            MenuItem.restaurant_id == user_cart.restaurant_id,
+        )
+    )
+    menu_items = result.scalars().all()
+    menu_item_map = {item.id: item for item in menu_items}
+
+    # 5. Validate each cart item and compute subtotal
+    subtotal = Decimal("0.00")
+
+    for cart_item in user_cart.items:
+        menu_item = menu_item_map.get(cart_item.menu_item_id)
+
+        if not menu_item:
+            raise HTTPException(status_code=409, detail="A cart item is no longer available at this restaurant")
+
+        if menu_item.status != MenuItemStatus.ACTIVE or not menu_item.is_available:
+            raise HTTPException(status_code=409, detail=f"'{menu_item.name}' is no longer available")
+
+        subtotal += menu_item.price * cart_item.quantity
+
+    # 6. Compute financials
+    TAX_RATE = Decimal(str(settings.tax_rate))
+    tax_amount = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
+    delivery_fee = Decimal(str(settings.base_delivery_price))
+    total_amount = subtotal + tax_amount + delivery_fee
+
+    # 7. Build address snapshot
+    address_snapshot = ", ".join(filter(None, [
+        address.address_line_1,
+        address.address_line_2,
+        address.city,
+        address.state,
+        address.postal_code,
+        address.country,
+    ]))
+
+    # 8. Create order
+    order = await create_order_from_cart(
+        cart=user_cart,
+        menu_item_map=menu_item_map,
+        restaurant=restaurant,
+        address=address,
+        address_snapshot=address_snapshot,
+        user=current_user,
+        subtotal=subtotal,
+        tax_amount=tax_amount,
+        delivery_fee=delivery_fee,
+        total_amount=total_amount,
+        payment_method=data.payment_method,
+        special_instructions=data.special_instructions,
+        db=db,
+    )
+
+    return order

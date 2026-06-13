@@ -272,7 +272,7 @@ class Address(Base):
     )
 
     orders: Mapped[list["Order"]] = relationship(
-        back_populates="address",
+        back_populates="delivery_address_ref",
     )
 
 
