@@ -5,4 +5,5 @@ def load_models():
     import app.modules.partner_applications.models
     import app.modules.payments.models
     import app.modules.restaurants.models
+    import app.modules.reviews.models
     import app.modules.users.models

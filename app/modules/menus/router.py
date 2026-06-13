@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, MultipleResultsFound, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
@@ -23,6 +24,7 @@ from app.modules.menus.models import (
     MenuCategory,
     MenuCategoryStatus,
     MenuItem,
+    MenuItemImage,
     MenuItemStatus,
 )
 from app.modules.menus.schemas import (
@@ -33,6 +35,7 @@ from app.modules.menus.schemas import (
     MenuCategoryItemReorderRequest,
     MenuCategoryItemReorderResponse,
     MenuCategoryListResponse,
+    MenuCategoryPaginatedResponse,
     MenuCategoryReorderRequest,
     MenuCategoryReorderResponse,
     MenuCategoryUnarchiveResponse,
@@ -50,6 +53,7 @@ from app.modules.restaurants.models import (
     Restaurant,
     RestaurantImage,
     RestaurantImageType,
+    RestaurantStatus,
 )
 from app.modules.users.models import User, UserRole
 
@@ -151,46 +155,55 @@ async def create_menu_category(
     return new_menu_category
 
 
-@router.get("/{restaurant_id}/menu-categories", response_model=MenuCategoryListResponse)
-async def get_all_menu_categories_for_restaurant(
+# restaurant owner's path to view all the menu categories of his restaurant
+@router.get(
+    "/{restaurant_id}/menu-categories/manage",
+    response_model=MenuCategoryListResponse,
+)
+async def get_all_menu_categories_owner_view(
     restaurant_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_categories_per_page,
 ):
-
     result = await db.execute(
         select(Restaurant.id).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-
-    restaurant = result.scalars().first()
-
-    if not restaurant:
-
+    if not result.scalars().first():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Restaurant not found for this owner",
         )
 
+    base_where = [
+        MenuCategory.restaurant_id == restaurant_id,
+        MenuCategory.status.in_(
+            [MenuCategoryStatus.ACTIVE, MenuCategoryStatus.ARCHIVED]
+        ),
+    ]
+
+    total = await db.scalar(select(func.count(MenuCategory.id)).where(*base_where))
+
     result = await db.execute(
         select(MenuCategory)
-        .where(
-            MenuCategory.restaurant_id == restaurant_id,
-            MenuCategory.status.in_(
-                [MenuCategoryStatus.ACTIVE, MenuCategoryStatus.ARCHIVED],
-            ),
-        )
+        .where(*base_where)
         .order_by(MenuCategory.sort_order.asc())
+        .offset(skip)
+        .limit(limit)
     )
-
     menu_categories = result.scalars().all()
 
     return MenuCategoryListResponse(
         menu_categories=menu_categories,
-        total_categories=len(menu_categories),
+        total_categories=total or 0,
         restaurant_id=restaurant_id,
+        skip=skip,
+        limit=limit,
+        has_more=skip + len(menu_categories) < (total or 0),
     )
 
 
@@ -214,6 +227,21 @@ async def create_menu_item(
     data: MenuItemCreate,
 ):
 
+    result = await db.execute(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+
+    restaurant = result.scalars().first()
+
+    if not restaurant:
+
+        raise HTTPException(
+            staus_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found"
+        )
+
     # =========================
     # VERIFY CATEGORY BELONGS TO
     # THE OWNER AND RESTAURANT
@@ -228,20 +256,12 @@ async def create_menu_item(
         )
     )
 
-    try:
-        category = result.scalar_one()
+    category = result.scalar_one_or_none()
 
-    except NoResultFound:
+    if not category:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Menu category not found",
-        )
-
-    # just a Defensive check against data corruption
-    except MultipleResultsFound:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Data integrity error: multiple categories found.",
         )
 
     normalized_name = normalize(data.name)
@@ -251,7 +271,7 @@ async def create_menu_item(
     # WITHIN CATEGORY
     # =========================
     result = await db.execute(
-        select(MenuItem.id).where(
+        select(MenuItem).where(
             MenuItem.category_id == category_id,
             MenuItem.normalized_name == normalized_name,
         )
@@ -303,9 +323,12 @@ async def create_menu_item(
 
     db.add(new_item)
 
+    if restaurant.status != RestaurantStatus.MENU_ADDED:
+
+        restaurant.status = RestaurantStatus.MENU_ADDED
+
     try:
         await db.commit()
-        await db.refresh(new_item)
 
     except IntegrityError as exc:
         await db.rollback()
@@ -313,8 +336,19 @@ async def create_menu_item(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create menu item.",
-            # detail=str(exc),
         ) from exc
+
+    # =========================
+    # RE-FETCH WITH IMAGE
+    # relationship eager-loaded
+    # so Pydantic can serialize it
+    # =========================
+    result = await db.execute(
+        select(MenuItem)
+        .options(selectinload(MenuItem.image))
+        .where(MenuItem.id == new_item.id)
+    )
+    new_item = result.scalar_one()
 
     return new_item
 
@@ -322,6 +356,8 @@ async def create_menu_item(
 # =========================
 # UPLOAD MENU ITEM IMAGE
 # =========================
+
+
 @router.put(
     "/{restaurant_id}/menu-categories/{category_id}/items/{item_id}/image",
     response_model=ItemImageResponse,
@@ -338,7 +374,7 @@ async def upload_image_for_menu_item(
 
     # =========================
     # VERIFY ITEM OWNERSHIP
-    # AND URL CONSISTENCY
+    # AND URL PATH CONSISTENCY
     # =========================
     result = await db.execute(
         select(MenuItem)
@@ -372,13 +408,10 @@ async def upload_image_for_menu_item(
         )
 
     # =========================
-    # READ IMAGE
+    # READ AND PROCESS IMAGE
     # =========================
     raw = await image.read()
 
-    # =========================
-    # PROCESS IMAGE
-    # =========================
     try:
         jpeg_bytes, filename = await run_in_threadpool(
             process_image,
@@ -415,12 +448,34 @@ async def upload_image_for_menu_item(
             detail="Image upload to storage failed.",
         ) from exc
 
-    old_key = item.image_url
+    # =========================
+    # FETCH EXISTING IMAGE ROW
+    # (if any) BEFORE COMMIT
+    # so we can delete old file
+    # after successful DB write
+    # =========================
+    result = await db.execute(
+        select(MenuItemImage).where(
+            MenuItemImage.menu_item_id == item_id,
+        )
+    )
+    existing_image = result.scalar_one_or_none()
+    old_key = existing_image.image_url if existing_image else None
 
     # =========================
-    # UPDATE DATABASE
+    # UPSERT: UPDATE EXISTING
+    # ROW OR CREATE A NEW ONE
     # =========================
-    item.image_url = key
+    if existing_image:
+        existing_image.image_url = key
+        existing_image.updated_at = datetime.now(UTC)
+    else:
+        new_image = MenuItemImage(
+            restaurant_id=restaurant_id,
+            menu_item_id=item_id,
+            image_url=key,
+        )
+        db.add(new_image)
 
     try:
         await db.commit()
@@ -428,6 +483,7 @@ async def upload_image_for_menu_item(
     except Exception as exc:
         await db.rollback()
 
+        # new key was uploaded but DB write failed — clean it up
         await _cleanup_keys(storage, [key])
 
         raise HTTPException(
@@ -435,24 +491,34 @@ async def upload_image_for_menu_item(
             detail="Failed to save image information.",
         ) from exc
 
-    await db.refresh(item)
+    # =========================
+    # RESOLVE THE SAVED ROW
+    # =========================
+    if existing_image:
+        await db.refresh(existing_image)
+        saved_image = existing_image
+    else:
+        await db.refresh(new_image)
+        saved_image = new_image
 
     # =========================
-    # DELETE OLD IMAGE
+    # DELETE OLD STORAGE FILE
     # AFTER SUCCESSFUL COMMIT
     # =========================
-    if old_key:
+    if old_key and old_key != key:
         try:
             await storage.delete(old_key)
         except Exception:
+            # non-fatal: orphaned file in storage, can be cleaned up
+            # by a background sweep later
             pass
 
     # =========================
     # RETURN RESPONSE
     # =========================
     return ItemImageResponse(
-        id=item.id,
-        image_path=storage.public_url(item.image_url),
+        id=saved_image.id,
+        image_path=storage.public_url(saved_image.image_url),
     )
 
 
@@ -628,15 +694,6 @@ async def reorder_menu_categories(
     data: MenuCategoryReorderRequest,
 ):
 
-    # data comming from front end is list of category ids in new order
-    # {
-    # "category_ids": [
-    #     "italian_id",
-    #     "north_indian_id",
-    #     "chinese_id",
-    #     "fast_food_id"
-    # ]
-    # }
     restaurant = await db.scalar(
         select(Restaurant).where(
             Restaurant.id == restaurant_id,
@@ -656,26 +713,9 @@ async def reorder_menu_categories(
 
     menu_categories = result.scalars().all()
 
-    ## menu_categories would be a list of MenuCategory objects
-    # [
-    #     north_indian_obj,
-    #     chinese_obj,
-    #     fast_food_obj,
-    #     italian_obj
-    # ]
-
-    # Dict comp - menu_category is a MenuCategory object
     category_map = {
         menu_category.id: menu_category for menu_category in menu_categories
     }
-
-    ##category_map would look something like this
-    # {
-    #     "north_indian": north_indian_obj,
-    #     "chinese": chinese_obj,
-    #     "fast_food": fast_food_obj,
-    #     "italian": italian_obj
-    # }
 
     # all the mapped categories for this restraunt is not send by front end
     if len(data.category_ids) != len(menu_categories):
@@ -713,7 +753,6 @@ async def reorder_menu_categories(
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update the new sorting sorder, check the request and try again",
-            # detail=str(exc),
         ) from exc
 
     return MenuCategoryReorderResponse(
@@ -723,120 +762,19 @@ async def reorder_menu_categories(
     )
 
 
-# @router.put(
-#     "/{restaurant_id}/menu-categories/re-order",
-#     response_model=MenuCategoryReorderResponse,
-# )
-# async def reorder_menu_categories(
-#     restaurant_id: uuid.UUID,
-#     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
-#     db: Annotated[AsyncSession, Depends(get_db)],
-#     data: MenuCategoryReorderRequest,
-# ):
-#     # Verify restaurant ownership
-#     restaurant = await db.scalar(
-#         select(Restaurant).where(
-#             Restaurant.id == restaurant_id,
-#             Restaurant.owner_id == current_user.id,
-#         )
-#     )
-#     if not restaurant:
-#         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND,
-#             detail="Restaurant not found.",
-#         )
-
-#     # Fetch all categories for this restaurant
-#     result = await db.execute(
-#         select(MenuCategory)
-#         .where(MenuCategory.restaurant_id == restaurant_id)
-#         .with_for_update()  # lock rows to prevent concurrent reorders
-#     )
-#     menu_categories = result.scalars().all()
-
-#     category_map = {c.id: c for c in menu_categories}
-
-#     # Validate: all categories must be included
-#     if len(data.category_ids) != len(menu_categories):
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="All restaurant categories must be included in the request.",
-#         )
-
-#     # Validate: no duplicate IDs
-#     if len(data.category_ids) != len(set(data.category_ids)):
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Duplicate category IDs are not allowed.",
-#         )
-
-#     # Validate: all IDs belong to this restaurant
-#     for category_id in data.category_ids:
-#         if category_id not in category_map:
-#             raise HTTPException(
-#                 status_code=status.HTTP_400_BAD_REQUEST,  # 400, not 409
-#                 detail=f"Category {category_id} does not belong to this restaurant.",
-#             )
-
-#     try:
-#         # Single bulk UPDATE with CASE — one round trip, constraint checked at commit
-#         await db.execute(
-#             update(MenuCategory)
-#             .where(MenuCategory.id.in_(data.category_ids))
-#             .values(
-#                 sort_order=case(
-#                     {
-#                         category_id: index
-#                         for index, category_id in enumerate(data.category_ids, start=1)
-#                     },
-#                     value=MenuCategory.id,
-#                 )
-#             )
-#         )
-
-#         await db.commit()
-
-#     except IntegrityError as exc:
-#         await db.rollback()
-#         raise HTTPException(
-#             status_code=status.HTTP_409_CONFLICT,
-#             detail="Reorder failed due to a sort order conflict. Ensure the constraint is DEFERRABLE.",
-#         ) from exc
-
-#     except Exception as exc:
-#         await db.rollback()
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Failed to reorder categories.",
-#         ) from exc
-
-#     # Refresh to reflect new sort_order values from DB
-#     await db.refresh(menu_categories[0])  # triggers session sync
-#     result = await db.execute(
-#         select(MenuCategory)
-#         .where(MenuCategory.restaurant_id == restaurant_id)
-#         .order_by(MenuCategory.sort_order.asc())
-#     )
-#     updated_categories = result.scalars().all()
-
-#     return MenuCategoryReorderResponse(
-#         categories=updated_categories,
-#         total_categories=len(updated_categories),
-#         restaurant_id=restaurant_id,
-#     )
-
-
 @router.get(
-    "/{restaurant_id}/menu-categories/{category_id}/items",
+    "/{restaurant_id}/menu-categories/{category_id}/items/manage",
     response_model=MenuItemPaginatedResponse,
 )
-async def get_all_menu_items_for_category_paginated(
+async def get_all_menu_items_for_category_paginated_owner_view(
     restaurant_id: uuid.UUID,
     category_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = settings.application_per_page,
+    limit: Annotated[
+        int, Query(ge=1, le=100)
+    ] = settings.menuItems_per_catagory_per_page,
 ):
     # Verifying the category exists and belongs to this owner's restaurant
     category = await db.scalar(
@@ -865,11 +803,17 @@ async def get_all_menu_items_for_category_paginated(
             detail="You do not own this restaurant.",
         )
 
-    # Using Single query to — fetch items + total count via window function
+    # =========================
+    # FETCH ITEMS + TOTAL COUNT
+    # via window function; eager-
+    # load image on each item so
+    # Pydantic can serialize it
+    # =========================
     count_col = func.count().over().label("total")
 
     result = await db.execute(
         select(MenuItem, count_col)
+        .options(selectinload(MenuItem.image))
         .where(
             MenuItem.restaurant_id == restaurant_id,
             MenuItem.category_id == category_id,
@@ -1234,85 +1178,6 @@ async def delete_menu_category(
         ) from exc
 
 
-@router.delete(
-    "/{restaurant_id}/menu-categories/{category_id}/items/{item_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_item_from_menu_category(
-    item_id: uuid.UUID,
-    restaurant_id: uuid.UUID,
-    category_id: uuid.UUID,
-    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-
-    # restaurant ownership check
-    result = await db.execute(
-        select(Restaurant.id).where(
-            Restaurant.id == restaurant_id,
-            Restaurant.owner_id == current_user.id,
-        )
-    )
-
-    if not result.scalars().first():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Restaurant not found for this owner",
-        )
-
-    # category ownership check
-
-    result = await db.execute(
-        select(MenuCategory).where(
-            MenuCategory.restaurant_id == restaurant_id,
-            MenuCategory.id == category_id,
-        )
-    )
-
-    category = result.scalars().first()
-
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu category not found for this restaurant",
-        )
-
-    result = await db.execute(
-        select(MenuItem).where(
-            MenuItem.id == item_id,
-            MenuItem.category_id == category_id,
-            MenuItem.restaurant_id == restaurant_id,
-        )
-    )
-
-    item = result.scalars().first()
-
-    if not item:
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Menu Item not found",
-        )
-
-    if item.status != MenuItemStatus.ARCHIVED:
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Archive the item before deleting it.",
-        )
-
-    await db.delete(item)
-
-    try:
-        await db.commit()
-    except Exception as exc:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete the menu item.",
-        ) from exc
-
-
 # =========================
 # UPDATE MENU ITEM
 # =========================
@@ -1343,7 +1208,9 @@ async def update_menu_item(
         )
 
     result = await db.execute(
-        select(MenuItem).where(
+        select(MenuItem)
+        .options(selectinload(MenuItem.image))
+        .where(
             MenuItem.id == item_id,
             MenuItem.category_id == category_id,
             MenuItem.restaurant_id == restaurant_id,
@@ -1474,7 +1341,9 @@ async def toggle_menu_item_availability(
         )
 
     result = await db.execute(
-        select(MenuItem).where(
+        select(MenuItem)
+        .options(selectinload(MenuItem.image))
+        .where(
             MenuItem.id == item_id,
             MenuItem.category_id == category_id,
             MenuItem.restaurant_id == restaurant_id,
@@ -1547,7 +1416,9 @@ async def archive_menu_item(
         )
 
     result = await db.execute(
-        select(MenuItem).where(
+        select(MenuItem)
+        .options(selectinload(MenuItem.image))
+        .where(
             MenuItem.id == item_id,
             MenuItem.category_id == category_id,
             MenuItem.restaurant_id == restaurant_id,
@@ -1620,7 +1491,9 @@ async def unarchive_menu_item(
         )
 
     result = await db.execute(
-        select(MenuItem).where(
+        select(MenuItem)
+        .options(selectinload(MenuItem.image))
+        .where(
             MenuItem.id == item_id,
             MenuItem.category_id == category_id,
             MenuItem.restaurant_id == restaurant_id,
@@ -1666,7 +1539,6 @@ async def unarchive_menu_item(
 
 # =========================
 # DELETE MENU ITEM
-# (fix of existing broken route)
 # =========================
 
 
@@ -1724,3 +1596,112 @@ async def delete_menu_item(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete the menu item.",
         ) from exc
+
+
+# Customer/public view — no auth
+@router.get(
+    "/{restaurant_id}/menu-categories",
+    response_model=MenuCategoryPaginatedResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List active menu categories for a restaurant (customer view)",
+)
+async def get_all_menu_categories_customer_view(
+    restaurant_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_categories_per_page,
+):
+    restaurant_exists = await db.scalar(
+        select(Restaurant.id).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.status == RestaurantStatus.ACTIVE,
+        )
+    )
+    if not restaurant_exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found.",
+        )
+
+    base_where = [
+        MenuCategory.restaurant_id == restaurant_id,
+        MenuCategory.status == MenuCategoryStatus.ACTIVE,
+    ]
+
+    total = await db.scalar(select(func.count(MenuCategory.id)).where(*base_where))
+
+    result = await db.execute(
+        select(MenuCategory)
+        .where(*base_where)
+        .order_by(MenuCategory.sort_order.asc())
+        .offset(skip)
+        .limit(limit)
+    )
+    categories = result.scalars().all()
+
+    return MenuCategoryPaginatedResponse(
+        categories=categories,
+        restaurant_id=restaurant_id,
+        total=total or 0,
+        skip=skip,
+        limit=limit,
+        has_more=skip + len(categories) < (total or 0),
+    )
+
+
+@router.get(
+    "/{restaurant_id}/menu-categories/{category_id}/items",
+    response_model=MenuItemPaginatedResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List active menu items for a category (customer view)",
+)
+async def get_all_menu_items_for_category(
+    restaurant_id: uuid.UUID,
+    category_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_items_per_page,
+):
+
+    category_exists = await db.scalar(
+        select(MenuCategory.id).where(
+            MenuCategory.id == category_id,
+            MenuCategory.restaurant_id == restaurant_id,
+            MenuCategory.status == MenuCategoryStatus.ACTIVE,
+        )
+    )
+
+    if not category_exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not found for this restaurant.",
+        )
+
+    base_where = [
+        MenuItem.category_id == category_id,
+        MenuItem.restaurant_id == restaurant_id,
+        MenuItem.status == MenuItemStatus.ACTIVE,
+    ]
+
+    total = await db.scalar(select(func.count(MenuItem.id)).where(*base_where))
+
+    result = await db.execute(
+        select(MenuItem)
+        .options(selectinload(MenuItem.image))
+        .where(*base_where)
+        .order_by(MenuItem.sort_order.asc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    items = result.scalars().all()
+
+    return MenuItemPaginatedResponse(
+        items=items,
+        category_id=category_id,
+        restaurant_id=restaurant_id,
+        total=total or 0,
+        skip=skip,
+        limit=limit,
+        has_more=skip + len(items) < (total or 0),
+    )

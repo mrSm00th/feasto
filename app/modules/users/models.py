@@ -183,6 +183,11 @@ class User(Base):
         back_populates="user",
     )
 
+    reviews: Mapped[list["Review"]] = relationship(
+        back_populates="user",
+        foreign_keys="[Review.user_id]",
+    )
+
 
 class Address(Base):
     __tablename__ = "addresses"

@@ -141,10 +141,12 @@ class MenuCategorySchema(BaseSchema):
 
 # list response to show all menu categories
 class MenuCategoryListResponse(BaseSchema):
-
     menu_categories: list[MenuCategorySchema]
     total_categories: int
     restaurant_id: uuid.UUID
+    skip: int
+    limit: int
+    has_more: bool
 
 
 # schema to get all the menu items under a category
@@ -242,3 +244,48 @@ class MenuItemAvailabilityRequest(BaseModel):
 class MenuItemUpdateResponse(BaseModel):
     # full item fields
     model_config = ConfigDict(from_attributes=True)
+
+
+class MenuCategorySchema(BaseSchema):
+    id: uuid.UUID
+    name: str
+    description: str | None
+    sort_order: int
+    # status intentionally excluded — customer only sees ACTIVE,
+    # no need to expose it in the response
+
+
+class MenuCategoryPaginatedResponse(BaseSchema):
+    categories: list[MenuCategorySchema]
+    restaurant_id: uuid.UUID
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
+
+
+class MenuItemImageSchema(BaseSchema):
+    id: uuid.UUID
+    image_url: str  # resolve to public URL at route level if needed
+
+
+class MenuItemSchema(BaseSchema):
+    id: uuid.UUID
+    name: str
+    description: str | None
+    price: Decimal
+    veg_type: VegType
+    is_available: bool
+    sort_order: int
+    image: MenuItemImageSchema | None
+    # status excluded — customer only ever sees ACTIVE items
+
+
+class MenuItemPaginatedResponse(BaseSchema):
+    items: list[MenuItemSchema]
+    category_id: uuid.UUID
+    restaurant_id: uuid.UUID
+    total: int
+    skip: int
+    limit: int
+    has_more: bool

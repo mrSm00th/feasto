@@ -48,12 +48,22 @@ class DayOfWeek(str, enum.Enum):
     SUNDAY = "SUNDAY"
 
 
+# class RestaurantStatus(str, enum.Enum):
+#     DRAFT = "DRAFT"
+#     BASIC_INFO_ADDED = "BASIC_INFO_ADDED"
+#     DOCUMENTS_ADDED = "DOCUMENTS_ADDED"
+#     MENU_ADDED = "MENU_ADDED"
+#     SUBMITTED = "SUBMITTED"
+#     ACTIVE = "ACTIVE"
+#     SUSPENDED = "SUSPENDED"
+
+
 class RestaurantStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     BASIC_INFO_ADDED = "BASIC_INFO_ADDED"
     DOCUMENTS_ADDED = "DOCUMENTS_ADDED"
+    TIMINGS_ADDED = "TIMINGS_ADDED"
     MENU_ADDED = "MENU_ADDED"
-    SUBMITTED = "SUBMITTED"
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
 
@@ -172,9 +182,19 @@ class Restaurant(Base):
 
     # when the owner temporarily closes the restaurant for the day or for a specific period
     # they can set this flag to true. This will help in hiding the restaurant from the customers during that period.
-    is_manually_closed: Mapped[bool] = mapped_column(
+    # rename this column
+    is_manually_paused: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
+    )
+
+    pause_reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    paused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # admin level control
@@ -183,12 +203,12 @@ class Restaurant(Base):
         default=RestaurantStatus.DRAFT,
     )
 
-    is_submitted: Mapped[bool] = mapped_column(
+    is_activated: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
     )
 
-    submitted_at: Mapped[datetime | None] = mapped_column(
+    activated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -270,6 +290,10 @@ class Restaurant(Base):
         cascade="all, delete-orphan",
     )
 
+    reviews: Mapped[list["Review"]] = relationship(
+        back_populates="restaurant",
+    )
+
     __table_args__ = (
         UniqueConstraint(
             owner_id, normalized_name, normalized_address_line_1, normalized_city
@@ -300,8 +324,14 @@ class RestaurantAvailability(Base):
     )
 
     # Only used when status == OPEN
-    opening_time: Mapped[time | None] = mapped_column(Time, nullable=True)
-    closing_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    opening_time: Mapped[time | None] = mapped_column(
+        Time(timezone=True),
+        nullable=True,
+    )
+    closing_time: Mapped[time | None] = mapped_column(
+        Time(timezone=True),
+        nullable=True,
+    )
 
     # Supports multiple shifts (0,1,2...)
     shift_index: Mapped[int] = mapped_column(

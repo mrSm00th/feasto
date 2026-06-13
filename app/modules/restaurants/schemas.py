@@ -1,13 +1,16 @@
 import uuid
-from datetime import UTC, datetime, time
+from datetime import UTC
+from datetime import date as date_type
+from datetime import datetime, time, timedelta
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.restaurants.models import (
     AvailabilityStatus,
     MappedCuisineStatus,
     RestaurantStatus,
+    VegType,
 )
 
 
@@ -107,7 +110,9 @@ class ShiftEntry(BaseSchema):
 
 
 class RestaurantHoursUpload(BaseSchema):
-    hours: list[ShiftEntry] = Field(..., min_length=1, max_length=21)
+    hours: list[ShiftEntry] = Field(..., min_length=7, max_length=21)
+    # min 7 — one entry per day minimum
+    # max 21 — 7 days × 3 shifts max per day
 
     @model_validator(mode="after")
     def validate_no_duplicate_shifts(self) -> "RestaurantHoursUpload":
@@ -129,6 +134,28 @@ class RestaurantHoursUpload(BaseSchema):
                     "Each shift on a day must have a unique shift_index."
                 )
             seen.add(key)
+        return self
+
+    @model_validator(mode="after")
+    def validate_all_days_covered(self) -> "RestaurantHoursUpload":
+        submitted_days = {entry.day_of_week for entry in self.hours}
+        required_days = set(range(7))  # 0=Monday .. 6=Sunday
+        missing = required_days - submitted_days
+        if missing:
+            day_names = [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ]
+            missing_names = [day_names[d] for d in sorted(missing)]
+            raise ValueError(
+                f"All 7 days must be covered. Missing: {', '.join(missing_names)}. "
+                "Use status=CLOSED for days the restaurant is not open."
+            )
         return self
 
 
@@ -178,18 +205,27 @@ class DayHoursResponse(BaseSchema):
 # =========================
 
 
+class RestaurantPauseSchema(BaseSchema):
+    reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Optional reason for pausing (staff shortage, maintenance, etc.)",
+    )
+
+
 class ClosureCreate(BaseSchema):
     reason: str | None = Field(default=None, max_length=500)
-    starts_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    ends_at: datetime | None = None
+    end_date: date_type | None = Field(
+        default=None,
+        description="Last day of closure, inclusive. null = indefinite.",
+    )
 
     @model_validator(mode="after")
-    def validate_dates(self) -> "ClosureCreate":
-        if self.ends_at is not None:
-            if self.ends_at <= self.starts_at:
-                raise ValueError("ends_at must be after starts_at.")
-            if self.ends_at <= datetime.now(UTC):
-                raise ValueError("ends_at must be in the future.")
+    def validate_end_date(self) -> "ClosureCreate":
+        if self.end_date is not None:
+            today = datetime.now(UTC).date()
+            if self.end_date <= today:
+                raise ValueError("end_date must be a future date (at least tomorrow).")
         return self
 
 
@@ -310,3 +346,33 @@ class RestaurantPrimaryCuisineResponse(BaseSchema):
 class RestaurantPrimaryImageResponse(BaseSchema):
     id: uuid.UUID
     image_path: str
+
+
+# =========================
+# RESTAURANT RESPONSE SCHEMAS
+# =========================
+
+
+class RestaurantPrimaryImageSchema(BaseSchema):
+    id: uuid.UUID
+    image_url: str  # resolved to public URL at route level
+
+
+class RestaurantSchema(BaseSchema):
+    id: uuid.UUID
+    name: str
+    slug: str
+    veg_type: VegType
+    is_manually_paused: bool
+    pause_reason: str | None
+    paused_at: datetime | None
+    status: RestaurantStatus
+    primary_image: RestaurantPrimaryImageSchema | None = None
+
+
+class RestaurantByCityPaginatedResponse(BaseSchema):
+    restaurants: list[RestaurantSchema]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool

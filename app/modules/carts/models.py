@@ -2,30 +2,33 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Uuid
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
 
 
 class Cart(Base):
-
     __tablename__ = "carts"
-
-    # NOTE - one cart per user only
-    # cart will hold the items from a single restaurant only
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id"),
         nullable=False,
-        unique=True,
+        unique=True,  # enforces one cart per user at DB level
         index=True,
     )
 
@@ -34,11 +37,8 @@ class Cart(Base):
         nullable=False,
     )
 
-    total_amount: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
-        default=0,
-        nullable=False,
-    )
+    # DROP total_amount — compute it, don't store it
+    # @property or compute in schema from items
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -51,25 +51,24 @@ class Cart(Base):
         onupdate=lambda: datetime.now(UTC),
     )
 
-    # RELATIONSHIPS
-
-    user: Mapped["User"] = relationship(back_populates="cart")
+    # relationships
 
     items: Mapped[list["CartItem"]] = relationship(
         back_populates="cart",
-        cascade="all,delete-orphan",
+        cascade="all, delete-orphan",
     )
+    user: Mapped["User"] = relationship(back_populates="cart")
+
+    restaurant: Mapped["Restaurant"] = relationship()
 
 
 class CartItem(Base):
-
     __tablename__ = "cart_items"
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key=True,
         default=uuid.uuid4,
-        index=True,
     )
 
     cart_id: Mapped[uuid.UUID] = mapped_column(
@@ -81,8 +80,12 @@ class CartItem(Base):
     menu_item_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("menu_items.id"),
         nullable=False,
-        index=True,
     )
+
+    item_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )  # ADD THIS — snapshot at add time
 
     quantity: Mapped[int] = mapped_column(
         Integer,
@@ -92,18 +95,22 @@ class CartItem(Base):
     item_price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
+    )  # snapshot at add time
+
+    # total_price is quantity * item_price — derive it, don't store it
+
+    # UniqueConstraint so a user can't have duplicate rows for the same menu item
+    __table_args__ = (
+        UniqueConstraint(
+            "cart_id",
+            "menu_item_id",
+            name="uq_cart_menu_item",
+        ),
     )
 
-    total_price: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
-        nullable=False,
+    menu_item: Mapped["MenuItem"] = relationship()
+
+    cart: Mapped["Cart"] = relationship(
+        back_populates="items",
+        lazy="raise",
     )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-    )
-
-    menu_item: Mapped["MenuItem"] = relationship(back_populates="cart_items")
-
-    cart: Mapped["Cart"] = relationship(back_populates="items")
