@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unicodedata
 import uuid
+from datetime import time, timedelta, timezone
 from math import asin, cos, radians, sin, sqrt
 
 from fastapi import HTTPException, status
@@ -16,6 +17,21 @@ from app.modules.restaurants.models import Restaurant
 
 def normalize(text: str) -> str:
     return text.strip().lower()
+
+
+IST = timezone(timedelta(hours=5, minutes=30))
+UTC = timezone.utc
+
+
+def ist_time_to_utc(t: time) -> time:
+    """Convert a naive time (assumed IST) to UTC time."""
+    # Attach IST tzinfo, then convert to UTC
+    from datetime import date, datetime
+
+    dummy_date = date(2000, 1, 1)  # date doesn't matter, only time does
+    ist_dt = datetime.combine(dummy_date, t, tzinfo=IST)
+    utc_dt = ist_dt.astimezone(UTC)
+    return utc_dt.timetz()  # returns time with UTC tzinfo
 
 
 async def generate_unique_slug(db: AsyncSession, name: str, city: str) -> str:

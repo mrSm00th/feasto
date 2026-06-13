@@ -74,10 +74,9 @@ from app.modules.restaurants.schemas import (
     RestaurantSchema,
 )
 from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
-    _build_availability_rows,
     _get_owned_restaurant,
-    _get_upsert_fn,
     generate_unique_slug,
+    ist_time_to_utc,
     normalize,
     normalize_cuisine_name,
     slugify,
@@ -699,8 +698,12 @@ async def create_restaurant_hours(
             restaurant_id=restaurant_id,
             day_of_week=shift.day_of_week,
             status=shift.status,
-            opening_time=shift.opening_time,
-            closing_time=shift.closing_time,
+            opening_time=(
+                ist_time_to_utc(shift.opening_time) if shift.opening_time else None
+            ),
+            closing_time=(
+                ist_time_to_utc(shift.closing_time) if shift.closing_time else None
+            ),
             shift_index=shift.shift_index,
         )
         for shift in data.hours
@@ -780,8 +783,12 @@ async def update_day_hours(
                 restaurant_id=restaurant_id,
                 day_of_week=shift.day_of_week,
                 status=shift.status,
-                opening_time=shift.opening_time,
-                closing_time=shift.closing_time,
+                opening_time=(
+                    ist_time_to_utc(shift.opening_time) if shift.opening_time else None
+                ),
+                closing_time=(
+                    ist_time_to_utc(shift.closing_time) if shift.closing_time else None
+                ),
                 shift_index=shift.shift_index,
             )
             for shift in data.shifts

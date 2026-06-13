@@ -37,7 +37,20 @@ class Settings(BaseSettings):
     max_dining_menu_images_per_restaurant: int = 50
     max_restaurant_images_per_request: int = 10
     max_restaurant_dining_menu_images_per_request: int = 10
-    max_restaurant_food_images_per_request: int = 10
+    max_restaurant_food_images_per_request: int = 5
+
+    # used to show already approved cuisines
+    # so owner can choose cuisine for his restaurant
+    approved_cuisine_names_per_page: int = 10
+
+    # used by the restaurants page (/api/restaurants/)
+    #  to get all restaurants in the given city, sort by ratings
+    restaurants_per_page: int = 10
+
+    # used by cart module
+    menuItems_per_catagory_per_page: int = 10
+    menu_categories_per_page: int = 10
+    menu_items_per_page: int = 10
 
 
 settings = Settings()
