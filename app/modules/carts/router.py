@@ -11,20 +11,21 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
+from app.modules.addresses.models import Address
 from app.modules.carts.models import Cart, CartItem
 from app.modules.carts.schemas import (
     CartAddItemSchema,
+    CartCheckoutSchema,
     CartItemRemoveSchema,
     CartItemResponseSchema,
     CartResponseSchema,
-    CartCheckoutSchema,
     OrderResponseSchema,
 )
-from app.modules.menus.models import MenuItem, MenuItemStatus, MenuItemStatus
+from app.modules.menus.models import MenuItem, MenuItemStatus
 from app.modules.orders.services import create_order_from_cart
 from app.modules.payments.models import PaymentProvider
 from app.modules.restaurants.models import Restaurant, RestaurantStatus
-from app.modules.users.models import Address, User, UserRole
+from app.modules.users.models import User, UserRole
 
 router = APIRouter(prefix="/cart", tags=["cart"])
 
@@ -396,7 +397,9 @@ async def clear_cart(
         raise HTTPException(status_code=500, detail="Failed to clear cart")
 
 
-@router.post("/checkout", response_model=OrderResponseSchema, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/checkout", response_model=OrderResponseSchema, status_code=status.HTTP_201_CREATED
+)
 async def checkout(
     data: CartCheckoutSchema,
     current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
@@ -426,7 +429,9 @@ async def checkout(
     restaurant = result.scalar_one_or_none()
 
     if not restaurant:
-        raise HTTPException(status_code=409, detail="This restaurant is no longer accepting orders")
+        raise HTTPException(
+            status_code=409, detail="This restaurant is no longer accepting orders"
+        )
 
     # 3. Validate address
     result = await db.execute(
@@ -457,10 +462,15 @@ async def checkout(
         menu_item = menu_item_map.get(cart_item.menu_item_id)
 
         if not menu_item:
-            raise HTTPException(status_code=409, detail="A cart item is no longer available at this restaurant")
+            raise HTTPException(
+                status_code=409,
+                detail="A cart item is no longer available at this restaurant",
+            )
 
         if menu_item.status != MenuItemStatus.ACTIVE or not menu_item.is_available:
-            raise HTTPException(status_code=409, detail=f"'{menu_item.name}' is no longer available")
+            raise HTTPException(
+                status_code=409, detail=f"'{menu_item.name}' is no longer available"
+            )
 
         subtotal += menu_item.price * cart_item.quantity
 
@@ -471,14 +481,19 @@ async def checkout(
     total_amount = subtotal + tax_amount + delivery_fee
 
     # 7. Build address snapshot
-    address_snapshot = ", ".join(filter(None, [
-        address.address_line_1,
-        address.address_line_2,
-        address.city,
-        address.state,
-        address.postal_code,
-        address.country,
-    ]))
+    address_snapshot = ", ".join(
+        filter(
+            None,
+            [
+                address.address_line_1,
+                address.address_line_2,
+                address.city,
+                address.state,
+                address.postal_code,
+                address.country,
+            ],
+        )
+    )
 
     # 8. Create order
     order = await create_order_from_cart(

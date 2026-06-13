@@ -60,7 +60,7 @@ class Payment(Base):
         Enum(PaymentStatus),
         default=PaymentStatus.PENDING,
         nullable=False,
-        index= True,
+        index=True,
     )
 
     failure_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)

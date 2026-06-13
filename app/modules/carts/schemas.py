@@ -1,11 +1,12 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from app.modules.payments.models import PaymentProvider, PaymentStatus
+
 from app.modules.orders.models import OrderStatus
-from datetime import datetime
+from app.modules.payments.models import PaymentProvider, PaymentStatus
 
 
 class BaseSchema(BaseModel):
@@ -50,8 +51,6 @@ class CartResponseSchema(BaseSchema):
     total_price: Decimal
 
 
-
-
 class CartCheckoutSchema(BaseSchema):
     address_id: uuid.UUID
     payment_method: PaymentProvider
@@ -67,6 +66,7 @@ class CartCheckoutSchema(BaseSchema):
             return None
         return v
 
+
 class CartCheckoutSchema(BaseModel):
     address_id: uuid.UUID
     payment_method: PaymentProvider
@@ -74,6 +74,7 @@ class CartCheckoutSchema(BaseModel):
 
 
 # schemas.py in orders module (response)
+
 
 class OrderItemResponseSchema(BaseModel):
     id: uuid.UUID
@@ -92,7 +93,7 @@ class PaymentResponseSchema(BaseModel):
     provider: PaymentProvider
     amount: Decimal
     status: PaymentStatus
-    provider_order_id: str | None   # frontend needs this to open Razorpay sheet
+    provider_order_id: str | None  # frontend needs this to open Razorpay sheet
 
     model_config = ConfigDict(from_attributes=True)
 

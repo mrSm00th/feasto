@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db.database import engine
 from app.db.models_registry import load_models
+from app.modules.addresses import router as addresses
 from app.modules.admins import router as admins
 from app.modules.carts import router as carts
 from app.modules.menus import router as menus
@@ -37,3 +38,4 @@ app.include_router(admins.router)
 app.include_router(restaurants.router)
 app.include_router(menus.router)
 app.include_router(carts.router)
+app.include_router(addresses.router)
