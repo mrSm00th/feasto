@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +16,12 @@ class Settings(BaseSettings):
     secret_key: SecretStr
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
+
+    # razor pay fields
+
+    razorpay_key_id: str
+    razorpay_key_secret: str
+    razorpay_webhook_secret: str
 
     application_per_page: int = 10
 
@@ -51,6 +59,11 @@ class Settings(BaseSettings):
     menuItems_per_catagory_per_page: int = 10
     menu_categories_per_page: int = 10
     menu_items_per_page: int = 10
+
+    # base delivery price - Cart
+    base_delivery_price: Decimal = Decimal("50.00")
+
+    tax_rate: Decimal = Decimal("0.18")
 
 
 settings = Settings()

@@ -1,4 +1,5 @@
 def load_models():
+    import app.modules.addresses.models
     import app.modules.carts.models
     import app.modules.menus.models
     import app.modules.orders.models

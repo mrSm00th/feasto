@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Razorpay Test{% endblock %}
+
+{% block content %}
+<h2>Razorpay Test Payment</h2>
+
+<div class="card">
+  <label>API Base URL</label>
+  <input id="apiBase" value="http://localhost:8000">
+
+  <label>Access Token (JWT)</label>
+  <input id="token" placeholder="Paste your bearer token here">
+
+  <label>Order ID</label>
+  <input id="orderId" placeholder="Order UUID from /cart/checkout response">
+
+  <button onclick="initiatePayment()">Initiate &amp; Pay</button>
+</div>
+
+<div class="card">
+  <h3>Razorpay Order Response</h3>
+  <pre id="orderDetails">—</pre>
+</div>
+
+<div class="card">
+  <h3>Payment Result</h3>
+  <pre id="result">—</pre>
+</div>
+
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+async function initiatePayment() {
+  const apiBase = document.getElementById('apiBase').value;
+  const token = document.getElementById('token').value;
+  const orderId = document.getElementById('orderId').value;
+
+  const res = await fetch(`${apiBase}/payments/orders/${orderId}/initiate`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+
+  if (!res.ok) {
+    document.getElementById('orderDetails').textContent =
+      `Error ${res.status}: ${await res.text()}`;
+    return;
+  }
+
+  const data = await res.json();
+  document.getElementById('orderDetails').textContent = JSON.stringify(data, null, 2);
+
+  const options = {
+    key: data.razorpay_key_id,
+    amount: data.amount,
+    currency: data.currency,
+    order_id: data.razorpay_order_id,
+    name: "KartFlow",
+    description: `Order ${data.order_id}`,
+    handler: function (response) {
+      document.getElementById('result').textContent = JSON.stringify(response, null, 2);
+    },
+    modal: {
+      ondismiss: function () {
+        document.getElementById('result').textContent = 'Payment popup closed without completing.';
+      }
+    },
+    prefill: {
+      name: "Test User",
+      email: "test@example.com",
+      contact: "9999999999"
+    },
+    theme: { color: "#3399cc" }
+  };
+
+  const rzp = new Razorpay(options);
+
+  rzp.on('payment.failed', function (response) {
+    document.getElementById('result').textContent = JSON.stringify(response.error, null, 2);
+  });
+
+  rzp.open();
+}
+</script>
+{% endblock %}
