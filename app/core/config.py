@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
+    # razor pay fields
+
+    razorpay_key_id: str
+    razorpay_key_secret: str
+    razorpay_webhook_secret: str
+
     application_per_page: int = 10
 
     dtorage_backend: str = "local"

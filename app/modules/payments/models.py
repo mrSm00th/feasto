@@ -10,7 +10,7 @@ from app.db.database import Base
 
 
 class PaymentStatus(str, enum.Enum):
-    PENDING = "PENDING"
+    PENDING = "PENDING"  # awaiting payment capture
     PAID = "PAID"
     FAILED = "FAILED"
     REFUNDED = "REFUNDED"
