@@ -226,6 +226,12 @@ class NotificationType(str, enum.Enum):
     CUISINE_REJECTED = "CUISINE_REJECTED"
     CUISINE_REVOKED = "CUISINE_REVOKED"
 
+    # order lifecycle events
+    ORDER_PLACED = "ORDER_PLACED"  # → restaurant owner
+    ORDER_CONFIRMED = "ORDER_CONFIRMED"  # → customer
+    ORDER_REJECTED = "ORDER_REJECTED"  # → customer
+    ORDER_CANCELLED = "ORDER_CANCELLED"  # → customer (auto-cancel)
+
 
 class Notification(Base):
     __tablename__ = "notifications"

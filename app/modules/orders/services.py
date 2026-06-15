@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -6,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.modules.orders.models import Order, OrderItem, OrderStatus
 from app.modules.payments.models import Payment, PaymentProvider, PaymentStatus
+from app.modules.users.models import Notification, NotificationType
 
 
 async def create_order_from_cart(
@@ -85,3 +87,26 @@ async def create_order_from_cart(
         .where(Order.id == order.id)
     )
     return result.scalar_one()
+
+
+async def create_notification(
+    user_id: uuid.UUID,  # the restaurant owner's id
+    reference_id: uuid.UUID,  # the order id
+    db: AsyncSession,
+    title: str,
+    content: str,
+    type: NotificationType,
+):
+
+    notification = Notification(
+        user_id=user_id,
+        type=NotificationType.ORDER_PLACED,
+        reference_id=reference_id,
+        title=title,
+        content=content,
+    )
+
+    db.add(notification)
+
+    return notification  # only addining the notification in db,
+    # will committed by caller function
