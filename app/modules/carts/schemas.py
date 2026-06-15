@@ -98,6 +98,8 @@ class PaymentResponseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# intentionally duplicates so that we dont have to import it from
+# order module and depent on it
 class OrderResponseSchema(BaseModel):
     id: uuid.UUID
     restaurant_id: uuid.UUID

@@ -17,7 +17,10 @@ from app.core.dependencies import require_roles
 from app.core.razorpay_client import razorpay_client
 from app.db.database import get_db
 from app.modules.orders.models import Order, OrderStatus
-from app.modules.orders.services import notify_restaurant_new_order
+from app.modules.orders.services import (
+    add_order_notification,
+    push_new_order_to_restaurant,
+)
 from app.modules.payments.models import Payment, PaymentStatus
 from app.modules.payments.schemas import InitiatePaymentResponseSchema
 from app.modules.users.models import User, UserRole
@@ -203,18 +206,6 @@ async def handle_payment_captured(payload: dict, db: AsyncSession):
     payment.order.status = OrderStatus.PLACED
     payment.order.placed_at = now
 
-    # NOTE: importing cart here to prevent any circular import issues
-    from app.modules.carts.models import Cart
-
-    result = await db.execute(select(Cart).where(Cart.user_id == payment.order.user_id))
-    cart = result.scalar_one_or_none()
-    if cart:
-        await db.delete(cart)
-
-    await db.commit()
-
-    # notify restaurant for new order
-
     # fetch order by the razor
     order_id = payload["payload"]["payment"]["entity"]["notes"]["order_id"]
     user_id = payload["payload"]["payment"]["entity"]["notes"]["user_id"]
@@ -233,8 +224,20 @@ async def handle_payment_captured(payload: dict, db: AsyncSession):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="order not found"
         )
+    notification = await add_order_notification(order, db)
+    db.add(notification)
 
-    notify_restaurant_new_order(order, db)
+    # NOTE: importing cart here to prevent any circular import issues
+    from app.modules.carts.models import Cart
+
+    result = await db.execute(select(Cart).where(Cart.user_id == payment.order.user_id))
+    cart = result.scalar_one_or_none()
+    if cart:
+        await db.delete(cart)
+
+    await db.commit()
+
+    await push_new_order_to_restaurant(order, db)
 
 
 async def handle_payment_failed(payload: dict, db: AsyncSession):

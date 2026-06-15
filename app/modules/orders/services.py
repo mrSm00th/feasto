@@ -82,7 +82,9 @@ async def create_order_from_cart(
         order.status = OrderStatus.PLACED
         order.placed_at = datetime.now(UTC)
 
-        await add_order_notification(order, db)
+        notification = await add_order_notification(order, db)
+
+        db.add(notification)
         await db.delete(cart)
 
     # a single commit for everything above
@@ -174,9 +176,11 @@ async def add_order_notification(order: Order, db: AsyncSession):
         db=db,
     )
 
-    # commit in the caller function
+    return notification
 
 
+# NOTE: we're just sending the data to the browser of the owner dashboard
+# the dashboard front end decided what to do
 async def push_new_order_to_restaurant(order: Order, db: AsyncSession):
 
     restaurant = await get_restaurant_with_owner(order.restaurant_id, db)
@@ -193,3 +197,52 @@ async def push_new_order_to_restaurant(order: Order, db: AsyncSession):
             "created_at": order.created_at.isoformat(),
         },
     )
+
+
+async def get_restaurant_owned_by(
+    restaurant_id: uuid.UUID,
+    current_user_id: uuid.UUID,
+    db: AsyncSession,
+):
+
+    result = await db.execute(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user_id,
+        )
+    )
+
+    restaurant = result.scalar_one_or_none()
+
+    if not restaurant:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="restaurant not found",
+        )
+
+    return restaurant
+
+
+async def get_order_owned_by_restaurant(
+    order_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession,
+):
+
+    result = await db.execute(
+        select(Order)
+        .join(Restaurant)
+        .where(Restaurant.owner_id == user_id, Order.id == order_id)
+    )
+
+    order = result.scalars().first()
+
+    if not order:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="order not found",
+        )
+
+    return order

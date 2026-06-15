@@ -9,6 +9,7 @@ from app.modules.addresses import router as addresses
 from app.modules.admins import router as admins
 from app.modules.carts import router as carts
 from app.modules.menus import router as menus
+from app.modules.orders import router as orders
 from app.modules.partner_applications import router as partner_applications
 from app.modules.payments.router import router as payments_router
 from app.modules.restaurants import router as restaurants
@@ -41,3 +42,4 @@ app.include_router(menus.router)
 app.include_router(carts.router)
 app.include_router(addresses.router)
 app.include_router(payments_router)
+app.include_router(orders.router)
