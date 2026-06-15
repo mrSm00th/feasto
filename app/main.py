@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.core.scheduler import scheduler, start_scheduler
 from app.db.database import engine
 from app.db.models_registry import load_models
 from app.modules.addresses import router as addresses
@@ -19,10 +20,14 @@ from app.modules.users import router as users
 # generatings tables using alembic
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Startup
+    # STARTUP
+    start_scheduler()
+
+    # RUN APP
     yield
 
-    # Shutdown
+    # SHUTDOWN
+    scheduler.shutdown()
     await engine.dispose()
 
 
