@@ -1,12 +1,16 @@
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.modules.orders.models import Order, OrderItem, OrderStatus
 from app.modules.payments.models import Payment, PaymentProvider, PaymentStatus
+from app.modules.realtime.connection_manager import manager
+from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import Notification, NotificationType
 
 
@@ -45,6 +49,7 @@ async def create_order_from_cart(
         total_amount=total_amount,
         payment_method=payment_method,
         # placed_at is None here — set when payment confirms
+        # but for cod we'll set it later belong in this same func
     )
 
     db.add(order)
@@ -73,11 +78,19 @@ async def create_order_from_cart(
 
     # for COD — cart cleared in the same transaction
     if payment_method == PaymentProvider.COD:
+
+        order.status = OrderStatus.PLACED
+        order.placed_at = datetime.now(UTC)
+
+        await add_order_notification(order, db)
         await db.delete(cart)
 
+    # a single commit for everything above
     await db.commit()
 
     # Reloading with  relationships for the response schema
+    # and for the push
+
     result = await db.execute(
         select(Order)
         .options(
@@ -86,7 +99,14 @@ async def create_order_from_cart(
         )
         .where(Order.id == order.id)
     )
-    return result.scalar_one()
+
+    order = result.scalar_one()
+
+    if order.payment_method == PaymentProvider.COD:
+
+        await push_new_order_to_restaurant(order, db)
+
+    return order
 
 
 async def create_notification(
@@ -100,7 +120,7 @@ async def create_notification(
 
     notification = Notification(
         user_id=user_id,
-        type=NotificationType.ORDER_PLACED,
+        type=type,
         reference_id=reference_id,
         title=title,
         content=content,
@@ -110,3 +130,66 @@ async def create_notification(
 
     return notification  # only addining the notification in db,
     # will committed by caller function
+
+
+async def get_restaurant_with_owner(
+    restaurant_id: uuid.UUID,
+    db: AsyncSession,
+):
+
+    result = await db.execute(
+        select(Restaurant)
+        .options(selectinload(Restaurant.owner))
+        .where(Restaurant.id == restaurant_id)
+    )
+
+    restaurant = result.scalar_one_or_none()
+
+    if not restaurant:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner",
+        )
+
+    return restaurant
+
+
+# These two functions work collectively
+# creates a notification -> stores it and if the owner is up
+# pushed the notification through websocket
+
+
+async def add_order_notification(order: Order, db: AsyncSession):
+
+    restaurant = await get_restaurant_with_owner(order.restaurant_id, db)
+
+    # Layer 1 — persistent record
+    notification = await create_notification(
+        user_id=restaurant.owner_id,
+        type=NotificationType.ORDER_PLACED,
+        reference_id=order.id,
+        title="New Order Received",
+        content=f"Order #{str(order.id)[:8]} — ₹{order.total_amount}",
+        db=db,
+    )
+
+    # commit in the caller function
+
+
+async def push_new_order_to_restaurant(order: Order, db: AsyncSession):
+
+    restaurant = await get_restaurant_with_owner(order.restaurant_id, db)
+
+    # Layer 2 — real-time push (if owner's dashboard is open)
+    # creating the json response(dict type layered response)
+    await manager.send_to_restaurant(
+        restaurant_id=order.restaurant_id,
+        message={
+            "type": "new_order",
+            "order_id": str(order.id),
+            "total_amount": str(order.total_amount),
+            "items_count": len(order.items),
+            "created_at": order.created_at.isoformat(),
+        },
+    )

@@ -17,6 +17,7 @@ from app.core.dependencies import require_roles
 from app.core.razorpay_client import razorpay_client
 from app.db.database import get_db
 from app.modules.orders.models import Order, OrderStatus
+from app.modules.orders.services import notify_restaurant_new_order
 from app.modules.payments.models import Payment, PaymentStatus
 from app.modules.payments.schemas import InitiatePaymentResponseSchema
 from app.modules.users.models import User, UserRole
@@ -212,7 +213,28 @@ async def handle_payment_captured(payload: dict, db: AsyncSession):
 
     await db.commit()
 
-    # TODO: notify restaurant (Phase 4)
+    # notify restaurant for new order
+
+    # fetch order by the razor
+    order_id = payload["payload"]["payment"]["entity"]["notes"]["order_id"]
+    user_id = payload["payload"]["payment"]["entity"]["notes"]["user_id"]
+
+    result = await db.execute(
+        select(Order).where(
+            Order.id == order_id,
+            Order.user_id == user_id,
+        )
+    )
+
+    order = result.scalar_one_or_none()
+
+    if not order:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="order not found"
+        )
+
+    notify_restaurant_new_order(order, db)
 
 
 async def handle_payment_failed(payload: dict, db: AsyncSession):

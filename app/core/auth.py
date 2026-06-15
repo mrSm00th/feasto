@@ -19,10 +19,6 @@ password_hash = PasswordHash.recommended()
 
 oauth_scheme = OAuth2PasswordBearer(tokenUrl="/api/users/token")
 
-oauth_scheme_optional = OAuth2PasswordBearer(
-    tokenUrl="/api/users/token", auto_error=False
-)
-
 
 def hash_password(password: str) -> str:
     return password_hash.hash(password)
@@ -116,3 +112,21 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_user_ws(
+    token: Annotated[str, Depends(oauth_scheme)],  # reads Authorization header
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = await db.get(User, uuid.UUID(user_id))
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user
