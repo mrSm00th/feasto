@@ -59,11 +59,12 @@ async def restaurant_order_updates_ws(
     restaurant = result.scalars().first()
 
     if not restaurant:
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="restaurant not found for this user",
+        await websocket.accept()
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Restaurant not found for this user",
         )
+        return
 
     # accepting the ws and registering it
     await manager.connect(restaurant_id, websocket)

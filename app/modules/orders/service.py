@@ -233,6 +233,7 @@ async def get_order_owned_by_restaurant(
     result = await db.execute(
         select(Order)
         .join(Restaurant)
+        .options(selectinload(Order.items), selectinload(Order.payment))
         .where(Restaurant.owner_id == user_id, Order.id == order_id)
     )
 

@@ -10,9 +10,10 @@ from app.modules.addresses import router as addresses
 from app.modules.admins import router as admins
 from app.modules.carts import router as carts
 from app.modules.menus import router as menus
-from app.modules.orders import router as orders
+from app.modules.orders import restaurant_orders_router as restaurant_orders
 from app.modules.partner_applications import router as partner_applications
 from app.modules.payments.router import router as payments_router
+from app.modules.realtime import router as realtime
 from app.modules.restaurants import router as restaurants
 from app.modules.users import router as users
 
@@ -47,4 +48,10 @@ app.include_router(menus.router)
 app.include_router(carts.router)
 app.include_router(addresses.router)
 app.include_router(payments_router)
-app.include_router(orders.router)
+app.include_router(
+    restaurant_orders.restaurant_orders_router
+)  # handles the incomming orders and stuff
+app.include_router(
+    restaurant_orders.order_actions_router
+)  # handles acting upon that orders like acc / rej
+app.include_router(realtime.router)

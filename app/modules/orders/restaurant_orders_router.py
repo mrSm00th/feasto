@@ -16,7 +16,7 @@ from app.modules.orders.schemas import (
     OrderResponseSchema,
     RejectOrderSchema,
 )
-from app.modules.orders.services import (
+from app.modules.orders.service import (
     create_notification,
     get_order_owned_by_restaurant,
     get_restaurant_owned_by,
@@ -24,13 +24,18 @@ from app.modules.orders.services import (
 from app.modules.restaurants.models import Restaurant
 from app.modules.users.models import Notification, NotificationType, User, UserRole
 
-# restaurant-facing routes
+""""
+    Handles the restaurant facing routes related to the orders
+"""
 
-router = APIRouter(prefix="/restaurant/orders", tags=["restaurant-orders"])
+restaurant_orders_router = APIRouter(prefix="/restaurants", tags=["restaurant-orders"])
+order_actions_router = APIRouter(
+    prefix="/restaurant/orders", tags=["restaurant-orders"]
+)
 
 
-@router.get(
-    "",
+@restaurant_orders_router.get(
+    "/{restaurant_id}/orders",
     response_model=IncomingOrdersResponseSchema,
 )
 async def get_incoming_orders_for_restaurant(
@@ -46,8 +51,8 @@ async def get_incoming_orders_for_restaurant(
     result = await db.execute(
         select(Order)
         .options(selectinload(Order.items), selectinload(Order.payment))
-        .where(Order.restaurant_id == restaurant_id)
-        .order_by(Order.created_at.desc())  # oldest orders first
+        .where(Order.restaurant_id == restaurant_id, Order.status == OrderStatus.PLACED)
+        .order_by(Order.created_at.asc())  # oldest orders first
     )
 
     orders = result.scalars().all()
@@ -55,7 +60,7 @@ async def get_incoming_orders_for_restaurant(
     return IncomingOrdersResponseSchema(total=len(orders), orders=orders)
 
 
-@router.post(
+@order_actions_router.post(
     "/{order_id}/accept",
     response_model=OrderResponseSchema,
 )
@@ -91,7 +96,7 @@ async def accept_order(
     return order
 
 
-@router.post("/{order_id}/reject", response_model=OrderResponseSchema)
+@order_actions_router.post("/{order_id}/reject", response_model=OrderResponseSchema)
 async def reject_order(
     order_id: uuid.UUID,
     data: RejectOrderSchema,  # { reason: str }

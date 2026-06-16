@@ -7,6 +7,8 @@ scheduler = AsyncIOScheduler()
 
 def start_scheduler():
 
+    print("Starting APScheduler...")
+
     scheduler.add_job(
         auto_cancel_stale_orders,
         trigger="interval",
@@ -15,3 +17,5 @@ def start_scheduler():
     )
 
     scheduler.start()
+
+    print("APScheduler started")

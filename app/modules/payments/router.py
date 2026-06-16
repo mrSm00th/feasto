@@ -17,7 +17,7 @@ from app.core.dependencies import require_roles
 from app.core.razorpay_client import razorpay_client
 from app.db.database import get_db
 from app.modules.orders.models import Order, OrderStatus
-from app.modules.orders.services import (
+from app.modules.orders.service import (
     add_order_notification,
     push_new_order_to_restaurant,
 )
