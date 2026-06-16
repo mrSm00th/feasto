@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.core.scheduler import scheduler, start_scheduler
 from app.db.database import engine
 from app.db.models_registry import load_models
 from app.modules.addresses import router as addresses
@@ -16,6 +15,7 @@ from app.modules.payments.router import router as payments_router
 from app.modules.realtime import router as realtime
 from app.modules.restaurants import router as restaurants
 from app.modules.users import router as users
+from snipits.scheduler.scheduler import scheduler, start_scheduler
 
 
 # generatings tables using alembic

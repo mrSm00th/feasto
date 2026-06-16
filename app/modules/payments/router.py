@@ -21,6 +21,7 @@ from app.modules.orders.service import (
     add_order_notification,
     push_new_order_to_restaurant,
 )
+from app.modules.orders.tasks import check_order_timeout
 from app.modules.payments.models import Payment, PaymentStatus
 from app.modules.payments.schemas import InitiatePaymentResponseSchema
 from app.modules.users.models import User, UserRole
@@ -71,7 +72,6 @@ async def initiate_payment(
 
     #    If order already has a provider_order_id, return it — not creating duplicate
     #    This is for handling the case where user hits "pay" twice
-
     if payment.provider_order_id:
         return InitiatePaymentResponseSchema(
             razorpay_order_id=payment.provider_order_id,
@@ -238,6 +238,12 @@ async def handle_payment_captured(payload: dict, db: AsyncSession):
     await db.commit()
 
     await push_new_order_to_restaurant(order, db)
+
+    # Schedule the timeout check — countdown is in seconds
+    check_order_timeout.apply_async(
+        args=[str(payment.order.id)],
+        countdown=settings.order_response_timeout_minutes * 60,
+    )
 
 
 async def handle_payment_failed(payload: dict, db: AsyncSession):

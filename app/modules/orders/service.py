@@ -7,7 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.modules.orders.models import Order, OrderItem, OrderStatus
+from app.modules.orders.tasks import check_order_timeout
 from app.modules.payments.models import Payment, PaymentProvider, PaymentStatus
 from app.modules.realtime.connection_manager import manager
 from app.modules.restaurants.models import Restaurant
@@ -89,6 +91,13 @@ async def create_order_from_cart(
 
     # a single commit for everything above
     await db.commit()
+
+    # NOTE:
+    # Schedule the timeout check — countdown is in seconds
+    check_order_timeout.apply_async(
+        args=[str(payment.order.id)],
+        countdown=settings.order_response_timeout_minutes * 60,
+    )
 
     # Reloading with  relationships for the response schema
     # and for the push
