@@ -188,6 +188,18 @@ class User(Base):
         foreign_keys="[Review.user_id]",
     )
 
+    # rider application relationships
+    rider_applications: Mapped[list["RiderApplication"]] = relationship(
+        back_populates="applicant",
+        cascade="all, delete-orphan",
+        foreign_keys=["RiderApplication.applicant_id"],
+    )
+
+    reviewed_rider_applications: Mapped[list["RiderApplication"]] = relationship(
+        back_populates="reviewer",
+        foreign_keys="[RiderApplication.reviewed_by]",
+    )
+
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
