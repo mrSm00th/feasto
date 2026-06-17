@@ -129,3 +129,73 @@ async def reject_order(
     await db.commit()
     await db.refresh(order)
     return order
+
+
+@order_actions_router.post(
+    "/{order_id}/preparing",
+    response_model=OrderResponseSchema,
+)
+async def change_order_status_to_preparing(
+    order_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    order = await get_order_owned_by_restaurant(order_id, current_user.id, db)
+
+    if order.status != OrderStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=409,
+            detail="Order must be CONFIRMED before moving to PREPARING",
+        )
+
+    order.status = OrderStatus.PREPARING
+    order.preparing_at = datetime.now(UTC)
+
+    await create_notification(
+        user_id=order.user_id,
+        type=NotificationType.ORDER_PREPARING,
+        reference_id=order.id,
+        title="Preparation Started",
+        content="The restaurant has started preparing your order",
+        db=db,
+    )
+
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
+@order_actions_router.post(
+    "/{order_id}/ready-for-pickup",
+    response_model=OrderResponseSchema,
+)
+async def change_order_status_to_ready_for_pickup(
+    order_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    order = await get_order_owned_by_restaurant(order_id, current_user.id, db)
+
+    if order.status != OrderStatus.PREPARING:
+        raise HTTPException(
+            status_code=409,
+            detail="Order must be PREPARING before moving to READY_FOR_PICKUP",
+        )
+
+    order.status = OrderStatus.READY_FOR_PICKUP
+    order.ready_at = datetime.now(UTC)
+
+    await create_notification(
+        user_id=order.user_id,
+        type=NotificationType.ORDER_READY_FOR_PICKUP,
+        reference_id=order.id,
+        title="Order Ready for Pickup",
+        content="Your order is ready and waiting for pickup",
+        db=db,
+    )
+
+    # TODO: assign rider here (Phase 3)
+
+    await db.commit()
+    await db.refresh(order)
+    return order
