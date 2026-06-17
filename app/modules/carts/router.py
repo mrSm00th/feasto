@@ -22,7 +22,7 @@ from app.modules.carts.schemas import (
     OrderResponseSchema,
 )
 from app.modules.menus.models import MenuItem, MenuItemStatus
-from app.modules.orders.services import create_order_from_cart
+from app.modules.orders.service import create_order_from_cart
 from app.modules.payments.models import PaymentProvider
 from app.modules.restaurants.models import Restaurant, RestaurantStatus
 from app.modules.users.models import User, UserRole

@@ -17,6 +17,11 @@ from app.core.dependencies import require_roles
 from app.core.razorpay_client import razorpay_client
 from app.db.database import get_db
 from app.modules.orders.models import Order, OrderStatus
+from app.modules.orders.service import (
+    add_order_notification,
+    push_new_order_to_restaurant,
+)
+from app.modules.orders.tasks import check_order_timeout
 from app.modules.payments.models import Payment, PaymentStatus
 from app.modules.payments.schemas import InitiatePaymentResponseSchema
 from app.modules.users.models import User, UserRole
@@ -67,7 +72,6 @@ async def initiate_payment(
 
     #    If order already has a provider_order_id, return it — not creating duplicate
     #    This is for handling the case where user hits "pay" twice
-
     if payment.provider_order_id:
         return InitiatePaymentResponseSchema(
             razorpay_order_id=payment.provider_order_id,
@@ -202,6 +206,27 @@ async def handle_payment_captured(payload: dict, db: AsyncSession):
     payment.order.status = OrderStatus.PLACED
     payment.order.placed_at = now
 
+    # fetch order by the razor
+    order_id = payload["payload"]["payment"]["entity"]["notes"]["order_id"]
+    user_id = payload["payload"]["payment"]["entity"]["notes"]["user_id"]
+
+    result = await db.execute(
+        select(Order).where(
+            Order.id == order_id,
+            Order.user_id == user_id,
+        )
+    )
+
+    order = result.scalar_one_or_none()
+
+    if not order:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="order not found"
+        )
+    notification = await add_order_notification(order, db)
+    db.add(notification)
+
     # NOTE: importing cart here to prevent any circular import issues
     from app.modules.carts.models import Cart
 
@@ -212,7 +237,13 @@ async def handle_payment_captured(payload: dict, db: AsyncSession):
 
     await db.commit()
 
-    # TODO: notify restaurant (Phase 4)
+    await push_new_order_to_restaurant(order, db)
+
+    # Schedule the timeout check — countdown is in seconds
+    check_order_timeout.apply_async(
+        args=[str(payment.order.id)],
+        countdown=settings.order_response_timeout_minutes * 60,
+    )
 
 
 async def handle_payment_failed(payload: dict, db: AsyncSession):
