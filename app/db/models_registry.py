@@ -1,10 +1,13 @@
 def load_models():
     import app.modules.addresses.models
     import app.modules.carts.models
+    import app.modules.locations.models
     import app.modules.menus.models
+    import app.modules.notifications.models
     import app.modules.orders.models
     import app.modules.partner_applications.models
     import app.modules.payments.models
     import app.modules.restaurants.models
     import app.modules.reviews.models
+    import app.modules.rider_applications.models
     import app.modules.users.models
