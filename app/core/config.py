@@ -70,5 +70,8 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/1"
     order_response_timeout_minutes: int = 5
 
+    # ferent key
+    pii_encryption_key: str
+
 
 settings = Settings()

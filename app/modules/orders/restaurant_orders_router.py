@@ -9,6 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import require_roles
 from app.db.database import get_db
+from app.modules.notifications.models import NotificationType
+from app.modules.notifications.services import create_notification
 from app.modules.orders.models import CancellationReason, Order, OrderStatus
 from app.modules.orders.schemas import (
     AcceptOrderSchema,
@@ -16,13 +18,9 @@ from app.modules.orders.schemas import (
     OrderResponseSchema,
     RejectOrderSchema,
 )
-from app.modules.orders.service import (
-    create_notification,
-    get_order_owned_by_restaurant,
-    get_restaurant_owned_by,
-)
-from app.modules.restaurants.models import Restaurant
-from app.modules.users.models import Notification, NotificationType, User, UserRole
+from app.modules.orders.services import get_order_owned_by_restaurant
+from app.modules.restaurants.services import get_restaurant_owned_by
+from app.modules.users.models import User, UserRole
 
 """"
     Handles the restaurant facing routes related to the orders

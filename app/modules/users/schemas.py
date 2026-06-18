@@ -1,4 +1,3 @@
-import enum
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -6,7 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.modules.restaurants.models import CuisineRequestHistory, RestaurantStatus
-from app.modules.users.models import NotificationType, UserStatus
+from app.modules.users.models import UserRole, UserStatus
 
 
 class BaseSchema(BaseModel):
@@ -16,12 +15,6 @@ class BaseSchema(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
-
-
-class UserRole(str, enum.Enum):
-    CUSTOMER = "CUSTOMER"
-    RESTURANT_OWNER = "RESTAURANT_OWNER"
-    ADMIN = "ADMIN"
 
 
 class UserCreate(BaseSchema):
@@ -65,30 +58,7 @@ class PaginatedOwnerRestaurant(BaseSchema):
     has_more: bool
 
 
-class NotificationResponse(BaseSchema):
-
-    id: uuid.UUID
-    type: NotificationType
-    title: str
-    # content: str sendng in detailed response
-    is_read: bool
-    created_at: datetime
-
-
 class CuisineRequestHistroryResponse(BaseSchema):
 
     id: uuid.UUID
     cuisine_name: str
-
-
-class NotificationDetailResponse(NotificationResponse):
-
-    content: str
-
-
-class PaginatedNotifications(BaseSchema):
-    notifications: list[NotificationResponse]
-    total: int
-    skip: int
-    limit: int
-    has_more: bool

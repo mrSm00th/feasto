@@ -7,12 +7,12 @@ from sqlalchemy.orm import selectinload
 
 from app.core.celery_app import celery_app
 from app.db.database import AsyncSessionLocal
+from app.modules.notifications.models import NotificationType
+from app.modules.notifications.services import create_notification
 from app.modules.orders.models import CancellationReason, Order, OrderStatus
-from app.modules.orders.service import create_notification
 
 # from app.modules.payments.service import refund_payment
 from app.modules.payments.models import PaymentStatus
-from app.modules.users.models import NotificationType
 
 
 @celery_app.task(name="orders.check_order_timeout")

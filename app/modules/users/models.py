@@ -192,12 +192,22 @@ class User(Base):
     rider_applications: Mapped[list["RiderApplication"]] = relationship(
         back_populates="applicant",
         cascade="all, delete-orphan",
-        foreign_keys=["RiderApplication.applicant_id"],
+        foreign_keys="[RiderApplication.applicant_id]",
     )
 
     reviewed_rider_applications: Mapped[list["RiderApplication"]] = relationship(
         back_populates="reviewer",
         foreign_keys="[RiderApplication.reviewed_by]",
+    )
+
+    cities_created: Mapped[list["City"]] = relationship(
+        back_populates="creator",
+        foreign_keys="[City.created_by]",
+    )
+
+    cities_inactivated: Mapped[list["City"]] = relationship(
+        back_populates="inactivator",
+        foreign_keys="[City.inactivated_by]",
     )
 
 
@@ -230,75 +240,3 @@ class RefreshToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="refresh_tokens")
-
-
-class NotificationType(str, enum.Enum):
-
-    CUISINE_APPROVED = "CUISINE_APPROVED"
-    CUISINE_REJECTED = "CUISINE_REJECTED"
-    CUISINE_REVOKED = "CUISINE_REVOKED"
-
-    # order lifecycle events
-    ORDER_PLACED = "ORDER_PLACED"  # → restaurant owner
-    ORDER_CONFIRMED = "ORDER_CONFIRMED"  # → customer
-    ORDER_REJECTED = "ORDER_REJECTED"  # → customer
-    ORDER_CANCELLED = "ORDER_CANCELLED"  # → customer (auto-cancel)
-
-
-class Notification(Base):
-    __tablename__ = "notifications"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        primary_key=True,
-        nullable=False,
-        index=True,
-        default=uuid.uuid4,
-    )
-
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id"),
-        nullable=False,
-    )
-
-    type: Mapped[NotificationType] = mapped_column(
-        Enum(NotificationType),
-        nullable=False,
-    )
-
-    # treating it as a soft reference
-    reference_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        nullable=False,
-    )
-
-    title: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-    )
-
-    content: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-    )
-
-    is_read: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-    )
-
-    read_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-    )
-
-    user: Mapped["User"] = relationship(
-        foreign_keys=[user_id],
-        back_populates="notifications",
-    )

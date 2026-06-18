@@ -38,7 +38,7 @@ from app.modules.restaurants.models import (
     Restaurant,
     RestaurantCuisineMapping,
 )
-from app.modules.users.models import Notification, NotificationType, User, UserRole
+from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
 
 router = APIRouter(prefix="/api/admin", tags=["admins"])
