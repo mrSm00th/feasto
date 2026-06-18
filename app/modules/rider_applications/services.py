@@ -138,3 +138,113 @@ async def add_identity_proof(
     await db.commit()
     await db.refresh(application)
     return application
+
+
+from app.core.image_processing import (
+    ImageProcessingError,
+    _image_key,
+    process_thumbnail,
+)
+
+
+async def add_profile_image(
+    application: RiderApplication,
+    image: UploadFile,
+    db: AsyncSession,
+) -> RiderApplication:
+    if application.status not in (
+        RiderApplicationStatus.IDENTITY_PROOF_ADDED,
+        RiderApplicationStatus.PROFILE_IMAGE_ADDED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Complete identity proof before adding a profile photo",
+        )
+
+    try:
+        content = await image.read()
+
+        processed_bytes, filename = process_thumbnail(content)
+
+    except ImageProcessingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    storage = get_private_storage()
+
+    key = _image_key(
+        application.id,
+        filename,
+        "rider-applications/profile-photos",
+    )
+
+    await storage.upload(
+        processed_bytes,
+        key,
+        content_type="image/jpeg",
+    )
+
+    application.profile_image = key
+    application.status = RiderApplicationStatus.PROFILE_IMAGE_ADDED
+
+    await db.commit()
+    await db.refresh(application)
+
+    return application
+
+
+from app.core.image_processing import ImageProcessingError, process_document
+
+
+async def add_vehicle_details(
+    application: RiderApplication,
+    vehicle_type: VehicleType,
+    vehicle_number: str,
+    license_number: str,
+    license_expiry_date,
+    license_image: UploadFile,
+    db: AsyncSession,
+) -> RiderApplication:
+    if application.status not in (
+        RiderApplicationStatus.PROFILE_IMAGE_ADDED,
+        RiderApplicationStatus.VEHICLE_DETAILS_ADDED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Complete the profile photo step before adding vehicle details",
+        )
+
+    try:
+        content = await license_image.read()
+
+        processed_bytes, filename = process_document(content)
+
+    except ImageProcessingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    storage = get_private_storage()
+
+    key = f"rider-applications/licenses/" f"{application.id}/{filename}"
+
+    await storage.upload(
+        processed_bytes,
+        key,
+        content_type="image/jpeg",
+    )
+
+    application.vehicle_type = vehicle_type
+    application.vehicle_number = vehicle_number
+    application.license_number = encrypt_pii(license_number)
+    application.license_expiry_date = license_expiry_date
+    application.license_image = key
+    application.status = RiderApplicationStatus.VEHICLE_DETAILS_ADDED
+
+    await db.commit()
+    await db.refresh(application)
+
+    return application

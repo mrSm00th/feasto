@@ -30,6 +30,7 @@ from app.core.constants import (
 )
 from app.core.dependencies import require_roles
 from app.core.image_processing import (
+    ALLOWED_MIME_TYPES,
     ImageProcessingError,
     _image_key,
     process_thumbnail,
@@ -96,7 +97,9 @@ router = APIRouter(prefix="/api/restaurants", tags=["restaurants"])
 
 
 MAX_FILES_PER_REQUEST = settings.max_restaurant_images_per_request
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+# NOTE: allowed mime types are now centralized in the core/image_processing.py
+# ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 # RESTAURANT_IMAGES_PREFIX = "restaurant_images"
 
