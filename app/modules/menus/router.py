@@ -17,7 +17,7 @@ from app.core.constants import (
 )
 from app.core.dependencies import require_roles
 from app.core.image_processing import ImageProcessingError, _image_key, process_image
-from app.core.storage import StorageBackend, _cleanup_keys, get_storage
+from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.core.text import normalize
 from app.db.database import get_db
 from app.modules.menus.models import (
@@ -369,7 +369,7 @@ async def upload_image_for_menu_item(
     image: Annotated[UploadFile, File(description="Menu item image (JPEG/PNG/WEBP)")],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     # =========================
@@ -555,7 +555,7 @@ async def upload_restaurant_dining_menu_images(
     ],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     restaurant = await db.scalar(

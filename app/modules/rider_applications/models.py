@@ -1,14 +1,18 @@
 import enum
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, Uuid
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, String, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
 
 
 class RiderApplicationStatus(str, enum.Enum):
+    CITY_ADDED = "CITY_ADDED"
+    IDENTITY_PROOF_ADDED = "IDENTITY_PROOF_ADDED"
+    PROFILE_IMAGE_ADDED = "PROFILE_IMAGE_ADDED"
+    VEHICLE_DETAILS_ADDED = "VEHICLE_DETAILS_ADDED"
     PENDING_REVIEW = "PENDING_REVIEW"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -39,61 +43,67 @@ class RiderApplication(Base):
         index=True,
     )
 
-    # Identity
-    identity_proof_type: Mapped[IdentityProofType] = mapped_column(
-        Enum(IdentityProofType),
-        nullable=False,
-    )
-
-    identity_proof_number: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
-    )
-
-    identity_proof_image: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-    )
-
-    profile_image: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-    )
-
-    # Vehicle
-    vehicle_type: Mapped[VehicleType] = mapped_column(
-        Enum(VehicleType),
-        nullable=False,
-    )
-
-    vehicle_number: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-
-    license_number: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-    )
-
-    license_expiry_date: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-
-    license_image: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-    )
-
-    # Review
     status: Mapped[RiderApplicationStatus] = mapped_column(
         Enum(RiderApplicationStatus),
-        default=RiderApplicationStatus.PENDING_REVIEW,
+        default=RiderApplicationStatus.CITY_ADDED,
         nullable=False,
         index=True,
     )
 
+    # Step 1 — city, only field guaranteed present from row creation
+    city_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cities.id"),
+        nullable=False,
+    )
+
+    # Identity
+    identity_proof_type: Mapped[IdentityProofType | None] = mapped_column(
+        Enum(IdentityProofType),
+        nullable=True,
+    )
+
+    identity_proof_number: Mapped[str | None] = mapped_column(
+        String(512),  # encrypted
+        nullable=True,
+    )
+
+    identity_proof_image: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    profile_image: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Vehicle
+    vehicle_type: Mapped[VehicleType | None] = mapped_column(
+        Enum(VehicleType),
+        nullable=True,
+    )
+
+    vehicle_number: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    license_number: Mapped[str | None] = mapped_column(
+        String(512),  # encrypted
+        nullable=True,
+    )
+
+    license_expiry_date: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    license_image: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Review
     rejection_reason: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
@@ -109,9 +119,20 @@ class RiderApplication(Base):
         nullable=True,
     )
 
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
     # Relationships
@@ -127,10 +148,18 @@ class RiderApplication(Base):
         back_populates="reviewed_rider_applications",
     )
 
+    city: Mapped["City"] = relationship()
+
     __table_args__ = (
         Index(
             "idx_rider_application_applicant_created_at",
             "applicant_id",
             "created_at",
+        ),
+        Index(
+            "uq_rider_applications_active_per_user",
+            "applicant_id",
+            unique=True,
+            postgresql_where=text("status NOT IN ('APPROVED', 'REJECTED')"),
         ),
     )

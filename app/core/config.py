@@ -25,13 +25,15 @@ class Settings(BaseSettings):
 
     application_per_page: int = 10
 
-    dtorage_backend: str = "local"
+    storage_backend: str = "local"
 
-    # s3_bucket_name: str
-    # s3_region: str = "us-west-001"
+    # storage_backend: str = "local"
+    # s3_public_bucket_name: str = ""
+    # s3_private_bucket_name: str = ""
+    # s3_region: str = ""
+    # s3_endpoint_url: str | None = None
     # s3_access_key_id: SecretStr | None = None
     # s3_secret_access_key: SecretStr | None = None
-    # s3_endpoint_url: str | None = None
 
     max_upload_size_bytes: int = Field(
         default=5 * 1024 * 1024,

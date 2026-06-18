@@ -30,7 +30,7 @@ from app.core.constants import (
 )
 from app.core.dependencies import require_roles
 from app.core.image_processing import ImageProcessingError, _image_key, process_image
-from app.core.storage import StorageBackend, _cleanup_keys, get_storage
+from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.db.database import get_db
 from app.modules.restaurants.models import (
     AvailabilityStatus,
@@ -238,7 +238,7 @@ async def upload_restaurant_images(
     ],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     restaurant = await db.scalar(
@@ -373,7 +373,7 @@ async def upload_primary_image_for_restaurant(
     image: Annotated[UploadFile, File(description="Menu item image (JPEG/PNG/WEBP)")],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
     result = await db.execute(
         select(Restaurant.id).where(
@@ -510,7 +510,7 @@ async def upload_restaurant_food_images(
     ],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     restaurant = await db.scalar(
@@ -642,7 +642,7 @@ async def delete_restaurant(
     restaurant_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
     restaurant = await db.scalar(
         select(Restaurant).where(
