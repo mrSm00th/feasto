@@ -16,7 +16,11 @@ from app.core.constants import (
     MENU_ITEM_IMAGE_STORAGE_PREFIX,
 )
 from app.core.dependencies import require_roles
-from app.core.image_processing import ImageProcessingError, _image_key, process_image
+from app.core.image_processing import (
+    ImageProcessingError,
+    _image_key,
+    process_thumbnail,
+)
 from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.core.text import normalize
 from app.db.database import get_db
@@ -414,7 +418,7 @@ async def upload_image_for_menu_item(
 
     try:
         jpeg_bytes, filename = await run_in_threadpool(
-            process_image,
+            process_thumbnail,
             raw,
         )
 
@@ -621,8 +625,8 @@ async def upload_restaurant_dining_menu_images(
     for file in files:
         raw = await file.read()
         try:
-            # process_image -> (jpeg_bytes, filename)
-            jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
+            # process_thumbnail -> (jpeg_bytes, filename)
+            jpeg_bytes, filename = await run_in_threadpool(process_thumbnail, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

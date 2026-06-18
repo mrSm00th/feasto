@@ -1,14 +1,15 @@
 """
 Storage backend abstraction.
 
-Applying Two access tiers, each with its own bucket (/or local folder in dev phase):
-    - public  : menu images, restaurant photos, rider profile photos —
-                anyone with the URL can view, no auth needed
-    - private : identity proofs, license images, KYC documents —
-                never publicly readable; access only via short-lived
-                signed URLs generated on demand for authorized requests
+Two access tiers, each its own bucket (or local folder in dev):
+    public  — menu images, restaurant photos, rider profile photos.
+               Anyone with the URL can view. No auth needed.
+    private — identity proofs, license images, KYC documents.
+               Never publicly readable. Access only via short-lived
+               signed URLs generated on demand for authorized requests.
 
-Switching backends between dev/production via STORAGE_BACKEND=local | s3 in .env.
+Switch backends via STORAGE_BACKEND=local | s3 in .env.
+Default is local so no extra config is needed during development.
 """
 
 from __future__ import annotations
@@ -28,39 +29,34 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-#  Abstract interface
+# Abstract interface
 
 
 class StorageBackend(ABC):
-    """Blueprint every storage backend must implement."""
 
     @abstractmethod
     async def upload(
         self, file_bytes: bytes, key: str, content_type: str = "image/jpeg"
-    ) -> None:
-        """Upload bytes to the given key."""
+    ) -> None: ...
 
     @abstractmethod
-    async def delete(self, key: str) -> None:
-        """Delete the object at key."""
+    async def delete(self, key: str) -> None: ...
 
     @abstractmethod
-    def public_url(self, key: str) -> str:
-        """Return a permanently-accessible URL. Only meaningful for public backends."""
+    def public_url(self, key: str) -> str: ...
 
     @abstractmethod
-    async def generate_signed_url(self, key: str, expires_in: int = 300) -> str:
-        """Return a temporary URL valid for `expires_in` seconds."""
+    async def generate_signed_url(self, key: str, expires_in: int = 300) -> str: ...
 
 
-# Local filesystem (for dev & tests)
+# Local filesystem (dev & tests)
 
 
 class LocalStorage(StorageBackend):
     """
-    Local-disk backend. No real access control exists for local dev —
-    signed URLs so, simply return the same path as public_url, since there's
-
+    Local-disk backend. No real access control in dev — generate_signed_url
+    just returns the same path as public_url. Swap to S3 in production for
+    real signed URL behaviour on the private bucket.
     """
 
     def __init__(self, base_dir: Path, url_prefix: str) -> None:
@@ -98,18 +94,18 @@ class LocalStorage(StorageBackend):
         return f"{self.url_prefix}/{key}"
 
     async def generate_signed_url(self, key: str, expires_in: int = 300) -> str:
+        # No real signing in dev — return the normal URL.
         return self.public_url(key)
 
 
-# AWS S3 (or any S3 style bucket storage for production)
+# ── AWS S3 / S3-compatible (production) ──────────────────────────────────
 
 
 class S3Storage(StorageBackend):
     """
-    S3-compatible backend. `bucket` is passed explicitly by the caller —
-    a single S3Storage instance always targets one specific bucket, so
-    the public/private split happens at construction time via the
-    factory functions below, not inside this class.
+    S3-compatible backend. bucket is passed explicitly — one instance
+    always targets one bucket. Public/private split happens at the factory
+    level, not inside this class.
     """
 
     def __init__(self, bucket: str) -> None:
@@ -177,33 +173,80 @@ class S3Storage(StorageBackend):
         return await run_in_threadpool(self._generate_signed_url_sync, key, expires_in)
 
 
-# Factories
+# ── Factories ─────────────────────────────────────────────────────────────
 
 
 def get_public_storage() -> StorageBackend:
     """
     For content shown to any user: menu images, restaurant photos,
-    rider profile photos.
+    rider profile photos (after approval).
     """
     backend = getattr(settings, "storage_backend", "local")
     if backend == "s3":
         return S3Storage(bucket=settings.s3_public_bucket_name)
-    return LocalStorage(base_dir=Path("media/public"), url_prefix="/media/public")
+    return LocalStorage(
+        base_dir=Path("media/public"),
+        url_prefix="/media/public",
+    )
 
 
 def get_private_storage() -> StorageBackend:
     """
     For sensitive documents: identity proofs, license images.
-    Never publicly readable — only accessed via generate_signed_url().
+    Never publicly readable — access only via generate_signed_url().
     """
     backend = getattr(settings, "storage_backend", "local")
     if backend == "s3":
         return S3Storage(bucket=settings.s3_private_bucket_name)
-    return LocalStorage(base_dir=Path("media/private"), url_prefix="/media/private")
+    return LocalStorage(
+        base_dir=Path("media/private"),
+        url_prefix="/media/private",
+    )
+
+
+def get_storage() -> StorageBackend:
+    """
+    Backward-compatible alias — returns the public storage backend.
+    Existing callers that don't need the public/private distinction
+    can keep using this unchanged. New code handling sensitive documents
+    should call get_private_storage() explicitly.
+    """
+    return get_public_storage()
+
+
+# ── Shared upload helper ──────────────────────────────────────────────────
+
+
+async def upload_processed_image(
+    storage: StorageBackend,
+    file_bytes: bytes,
+    key: str,
+) -> None:
+    """
+    Upload pre-processed JPEG bytes to storage with consistent error handling.
+    Raises HTTPException 502 on storage failure — caller does not need
+    its own try/except for the upload step.
+    """
+    from fastapi import HTTPException
+
+    try:
+        await storage.upload(file_bytes, key, content_type="image/jpeg")
+    except Exception as exc:
+        logger.exception("Storage upload failed for key %r", key)
+        raise HTTPException(
+            status_code=502,
+            detail="Image upload to storage failed. Please try again.",
+        ) from exc
+
+
+# ── Cleanup helper ────────────────────────────────────────────────────────
 
 
 async def _cleanup_keys(storage: StorageBackend, keys: list[str]) -> None:
-    """Delete storage objects without raising — used in error-recovery paths."""
+    """
+    Delete storage objects without raising — used in error-recovery paths
+    after a DB commit fails, to remove orphaned uploaded files.
+    """
     results = await asyncio.gather(
         *[storage.delete(k) for k in keys],
         return_exceptions=True,

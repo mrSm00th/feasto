@@ -29,7 +29,11 @@ from app.core.constants import (
     RESTAURANT_IMAGES_PREFIX,
 )
 from app.core.dependencies import require_roles
-from app.core.image_processing import ImageProcessingError, _image_key, process_image
+from app.core.image_processing import (
+    ImageProcessingError,
+    _image_key,
+    process_thumbnail,
+)
 from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.db.database import get_db
 from app.modules.restaurants.models import (
@@ -303,8 +307,8 @@ async def upload_restaurant_images(
     for file in files:
         raw = await file.read()
         try:
-            # process_image -> (jpeg_bytes, filename)
-            jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
+            # process_thumbnail -> (jpeg_bytes, filename)
+            jpeg_bytes, filename = await run_in_threadpool(process_thumbnail, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -403,7 +407,7 @@ async def upload_primary_image_for_restaurant(
 
     try:
         jpeg_bytes, filename = await run_in_threadpool(
-            process_image,
+            process_thumbnail,
             raw,
         )
     except ImageProcessingError as exc:
@@ -575,8 +579,8 @@ async def upload_restaurant_food_images(
     for file in files:
         raw = await file.read()
         try:
-            # process_image -> (jpeg_bytes, filename)
-            jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
+            # process_thumbnail -> (jpeg_bytes, filename)
+            jpeg_bytes, filename = await run_in_threadpool(process_thumbnail, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

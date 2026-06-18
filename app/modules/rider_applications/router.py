@@ -1,16 +1,20 @@
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_roles
 from app.db.database import get_db
+from app.modules.rider_applications.models import IdentityProofType
 from app.modules.rider_applications.schemas import (
     RiderApplicationResponseSchema,
     StartApplicationSchema,
 )
 from app.modules.rider_applications.services import (
+    add_identity_proof,
     get_active_application_for_user,
+    get_application_owned_by_user,
     start_application,
 )
 from app.modules.users.models import User, UserRole
@@ -49,3 +53,22 @@ async def get_my_application(
             detail="No active application found",
         )
     return application
+
+
+@router.post(
+    "/{application_id}/identity-proof", response_model=RiderApplicationResponseSchema
+)
+async def submit_identity_proof(
+    application_id: uuid.UUID,
+    identity_proof_type: Annotated[IdentityProofType, Form()],
+    identity_proof_number: Annotated[str, Form()],
+    image: Annotated[UploadFile, File()],
+    current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    application = await get_application_owned_by_user(
+        application_id, current_user.id, db
+    )
+    return await add_identity_proof(
+        application, identity_proof_type, identity_proof_number, image, db
+    )
