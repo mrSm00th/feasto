@@ -10,4 +10,5 @@ def load_models():
     import app.modules.restaurants.models
     import app.modules.reviews.models
     import app.modules.rider_applications.models
+    import app.modules.riders.models
     import app.modules.users.models

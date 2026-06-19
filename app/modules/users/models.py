@@ -210,6 +210,11 @@ class User(Base):
         foreign_keys="[City.inactivated_by]",
     )
 
+    rider: Mapped[Optional["Rider"]] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"

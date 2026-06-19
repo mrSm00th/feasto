@@ -11,7 +11,7 @@ from app.core.image_processing import (
     process_document,
     process_thumbnail,
 )
-from app.core.storage import get_private_storage
+from app.core.storage import get_private_storage, get_public_storage
 from app.modules.locations.models import City, CityStatus
 from app.modules.rider_applications.models import (
     IdentityProofType,
@@ -247,4 +247,104 @@ async def add_vehicle_details(
     await db.commit()
     await db.refresh(application)
 
+    return application
+
+
+async def submit_for_review(
+    application: RiderApplication,
+    db: AsyncSession,
+) -> RiderApplication:
+    if application.status != RiderApplicationStatus.VEHICLE_DETAILS_ADDED:
+        raise HTTPException(
+            status_code=409,
+            detail="All steps must be completed before submitting for review",
+        )
+
+    application.status = RiderApplicationStatus.PENDING_REVIEW
+    application.submitted_at = datetime.now(UTC)
+
+    await db.commit()
+    await db.refresh(application)
+    return application
+
+
+async def approve_rider_application(
+    application: RiderApplication,
+    admin: User,
+    db: AsyncSession,
+) -> RiderApplication:
+    """
+    Owns the entire approval transaction: flips application status,
+    promotes the user's role, creates the operational Rider profile,
+    and moves the profile photo from the private bucket into the
+    public bucket so it can be shown to customers tracking a delivery.
+    """
+    from app.modules.riders.models import (
+        Rider,
+    )  # local import — avoids circular dependency
+
+    if application.status != RiderApplicationStatus.PENDING_REVIEW:
+        raise HTTPException(status_code=409, detail="Application is not pending review")
+
+    # Move profile photo: private (onboarding) → public (operational)
+    private_storage = get_private_storage()
+    public_storage = get_public_storage()
+
+    public_key = f"riders/{application.applicant_id}/profile.jpg"
+
+    try:
+        signed_url = await private_storage.generate_signed_url(
+            application.profile_image, expires_in=60
+        )
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(signed_url)
+            response.raise_for_status()
+            image_bytes = response.content
+
+        await public_storage.upload(image_bytes, public_key, content_type="image/jpeg")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            # detail="Failed to finalize rider profile photo. Please try approving again.",
+            detail=str(exc),
+        )
+
+    application.status = RiderApplicationStatus.APPROVED
+    application.reviewed_by = admin.id
+    application.reviewed_at = datetime.now(UTC)
+
+    application.applicant.role = UserRole.RIDER
+
+    rider = Rider(
+        user_id=application.applicant_id,
+        vehicle_type=application.vehicle_type,
+        vehicle_number=application.vehicle_number,
+        license_expiry_date=application.license_expiry_date,
+        profile_image=public_key,
+    )
+    db.add(rider)
+
+    await db.commit()
+    await db.refresh(application)
+    return application
+
+
+async def reject_rider_application(
+    application: RiderApplication,
+    admin: User,
+    reason: str,
+    db: AsyncSession,
+) -> RiderApplication:
+    if application.status != RiderApplicationStatus.PENDING_REVIEW:
+        raise HTTPException(status_code=409, detail="Application is not pending review")
+
+    application.status = RiderApplicationStatus.REJECTED
+    application.reviewed_by = admin.id
+    application.reviewed_at = datetime.now(UTC)
+    application.rejection_reason = reason
+
+    await db.commit()
+    await db.refresh(application)
     return application

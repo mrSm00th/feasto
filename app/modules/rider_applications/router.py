@@ -3,16 +3,23 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_roles
+from app.core.encryption import decrypt_pii
+from app.core.storage import get_private_storage
 from app.db.database import get_db
 from app.modules.rider_applications.models import (
     IdentityProofType,
+    RiderApplication,
+    RiderApplicationStatus,
     VehicleType,
 )
 from app.modules.rider_applications.schemas import (
     IncomingRiderApplicationsResponseSchema,
+    RejectApplicationSchema,
+    RiderApplicationAdminDetailSchema,
     RiderApplicationResponseSchema,
     StartApplicationSchema,
 )
@@ -20,9 +27,12 @@ from app.modules.rider_applications.services import (
     add_identity_proof,
     add_profile_image,
     add_vehicle_details,
+    approve_rider_application,
     get_active_application_for_user,
     get_application_owned_by_user,
+    reject_rider_application,
     start_application,
+    submit_for_review,
 )
 from app.modules.users.models import User, UserRole
 
@@ -124,3 +134,87 @@ async def submit_vehicle_details(
         license_image,
         db,
     )
+
+
+@router.post("/{application_id}/submit", response_model=RiderApplicationResponseSchema)
+async def submit_application_for_review(
+    application_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    application = await get_application_owned_by_user(
+        application_id, current_user.id, db
+    )
+    return await submit_for_review(application, db)
+
+
+# ── Admin-facing ─────────────────────────────────────────────────────────
+
+
+@admin_router.get("", response_model=IncomingRiderApplicationsResponseSchema)
+async def list_pending_applications(
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(
+        select(RiderApplication)
+        .where(RiderApplication.status == RiderApplicationStatus.PENDING_REVIEW)
+        .order_by(RiderApplication.submitted_at.asc())
+    )
+    applications = result.scalars().all()
+    return IncomingRiderApplicationsResponseSchema(
+        total=len(applications), applications=applications
+    )
+
+
+@admin_router.get("/{application_id}", response_model=RiderApplicationAdminDetailSchema)
+async def get_application_detail(
+    application_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    application = await db.get(RiderApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    storage = get_private_storage()
+
+    return RiderApplicationAdminDetailSchema(
+        **RiderApplicationResponseSchema.model_validate(application).model_dump(),
+        identity_proof_number=decrypt_pii(application.identity_proof_number),
+        license_number=decrypt_pii(application.license_number),
+        identity_proof_image_url=await storage.generate_signed_url(
+            application.identity_proof_image
+        ),
+        profile_image_url=await storage.generate_signed_url(application.profile_image),
+        license_image_url=await storage.generate_signed_url(application.license_image),
+    )
+
+
+@admin_router.post(
+    "/{application_id}/approve", response_model=RiderApplicationResponseSchema
+)
+async def approve_application(
+    application_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    application = await db.get(RiderApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return await approve_rider_application(application, current_user, db)
+
+
+@admin_router.post(
+    "/{application_id}/reject", response_model=RiderApplicationResponseSchema
+)
+async def reject_application(
+    application_id: uuid.UUID,
+    data: RejectApplicationSchema,
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    application = await db.get(RiderApplication, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return await reject_rider_application(application, current_user, data.reason, db)

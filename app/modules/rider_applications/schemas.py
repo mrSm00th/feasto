@@ -44,3 +44,20 @@ class RiderApplicationResponseSchema(BaseModel):
 class IncomingRiderApplicationsResponseSchema(BaseModel):
     total: int
     applications: list[RiderApplicationResponseSchema]
+
+
+# admin facing routes schema
+
+
+class RejectApplicationSchema(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class RiderApplicationAdminDetailSchema(RiderApplicationResponseSchema):
+    """
+    Extends the standard response with decrypted PII — only ever
+    returned from the admin-only detail route, never the list route.
+    """
+
+    identity_proof_number: str
+    license_number: str
