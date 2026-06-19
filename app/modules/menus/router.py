@@ -16,8 +16,13 @@ from app.core.constants import (
     MENU_ITEM_IMAGE_STORAGE_PREFIX,
 )
 from app.core.dependencies import require_roles
-from app.core.image_processing import ImageProcessingError, _image_key, process_image
-from app.core.storage import StorageBackend, _cleanup_keys, get_storage
+from app.core.image_processing import (
+    ALLOWED_MIME_TYPES,
+    ImageProcessingError,
+    _image_key,
+    process_thumbnail,
+)
+from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.core.text import normalize
 from app.db.database import get_db
 from app.modules.menus.models import (
@@ -63,7 +68,9 @@ router = APIRouter(
 )
 
 MAX_FILES_PER_REQUEST = settings.max_restaurant_images_per_request
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+# NOTE: allowed mime types are now centralized in the core/image_processing.py
+# ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 @router.post(
@@ -369,7 +376,7 @@ async def upload_image_for_menu_item(
     image: Annotated[UploadFile, File(description="Menu item image (JPEG/PNG/WEBP)")],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     # =========================
@@ -414,7 +421,7 @@ async def upload_image_for_menu_item(
 
     try:
         jpeg_bytes, filename = await run_in_threadpool(
-            process_image,
+            process_thumbnail,
             raw,
         )
 
@@ -555,7 +562,7 @@ async def upload_restaurant_dining_menu_images(
     ],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     restaurant = await db.scalar(
@@ -621,8 +628,8 @@ async def upload_restaurant_dining_menu_images(
     for file in files:
         raw = await file.read()
         try:
-            # process_image -> (jpeg_bytes, filename)
-            jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
+            # process_thumbnail -> (jpeg_bytes, filename)
+            jpeg_bytes, filename = await run_in_threadpool(process_thumbnail, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

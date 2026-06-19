@@ -17,6 +17,8 @@ from app.modules.partner_applications import router as partner_applications
 from app.modules.payments.router import router as payments_router
 from app.modules.realtime import router as realtime
 from app.modules.restaurants import router as restaurants
+from app.modules.rider_applications import router as admmin_rider_application
+from app.modules.rider_applications import router as rider_applications
 from app.modules.users import router as users
 
 
@@ -57,3 +59,5 @@ app.include_router(realtime.router)
 app.include_router(notifications.router)
 app.include_router(locations.router)
 app.include_router(customer_orders.router)
+app.include_router(rider_applications.router)
+app.include_router(admmin_rider_application.admin_router)

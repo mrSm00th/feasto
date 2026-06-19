@@ -29,8 +29,13 @@ from app.core.constants import (
     RESTAURANT_IMAGES_PREFIX,
 )
 from app.core.dependencies import require_roles
-from app.core.image_processing import ImageProcessingError, _image_key, process_image
-from app.core.storage import StorageBackend, _cleanup_keys, get_storage
+from app.core.image_processing import (
+    ALLOWED_MIME_TYPES,
+    ImageProcessingError,
+    _image_key,
+    process_thumbnail,
+)
+from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.db.database import get_db
 from app.modules.restaurants.models import (
     AvailabilityStatus,
@@ -92,7 +97,9 @@ router = APIRouter(prefix="/api/restaurants", tags=["restaurants"])
 
 
 MAX_FILES_PER_REQUEST = settings.max_restaurant_images_per_request
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+# NOTE: allowed mime types are now centralized in the core/image_processing.py
+# ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 # RESTAURANT_IMAGES_PREFIX = "restaurant_images"
 
@@ -238,7 +245,7 @@ async def upload_restaurant_images(
     ],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     restaurant = await db.scalar(
@@ -303,8 +310,8 @@ async def upload_restaurant_images(
     for file in files:
         raw = await file.read()
         try:
-            # process_image -> (jpeg_bytes, filename)
-            jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
+            # process_thumbnail -> (jpeg_bytes, filename)
+            jpeg_bytes, filename = await run_in_threadpool(process_thumbnail, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -373,7 +380,7 @@ async def upload_primary_image_for_restaurant(
     image: Annotated[UploadFile, File(description="Menu item image (JPEG/PNG/WEBP)")],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
     result = await db.execute(
         select(Restaurant.id).where(
@@ -403,7 +410,7 @@ async def upload_primary_image_for_restaurant(
 
     try:
         jpeg_bytes, filename = await run_in_threadpool(
-            process_image,
+            process_thumbnail,
             raw,
         )
     except ImageProcessingError as exc:
@@ -510,7 +517,7 @@ async def upload_restaurant_food_images(
     ],
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
     restaurant = await db.scalar(
@@ -575,8 +582,8 @@ async def upload_restaurant_food_images(
     for file in files:
         raw = await file.read()
         try:
-            # process_image -> (jpeg_bytes, filename)
-            jpeg_bytes, filename = await run_in_threadpool(process_image, raw)
+            # process_thumbnail -> (jpeg_bytes, filename)
+            jpeg_bytes, filename = await run_in_threadpool(process_thumbnail, raw)
         except ImageProcessingError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -642,7 +649,7 @@ async def delete_restaurant(
     restaurant_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
-    storage: Annotated[StorageBackend, Depends(get_storage)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
     restaurant = await db.scalar(
         select(Restaurant).where(
