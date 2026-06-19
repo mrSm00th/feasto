@@ -76,3 +76,62 @@ async def _check_order_timeout_async(order_id_str: str) -> None:
         )
 
         await db.commit()
+
+
+@celery_app.task(name="orders.check_rider_assignment_timeout")
+def check_rider_assignment_timeout(order_id_str: str) -> None:
+    """
+    Fires N minutes after an order reaches READY_FOR_PICKUP.
+    If no rider has been assigned by then, auto-cancels the order
+    and refunds the customer.
+
+    Idempotent — if a rider was assigned in the meantime, the task
+    reads the updated status and exits without doing anything.
+    """
+    asyncio.run(_check_rider_assignment_timeout_async(order_id_str))
+
+
+async def _check_rider_assignment_timeout_async(order_id_str: str) -> None:
+    order_id = uuid.UUID(order_id_str)
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Order)
+            .options(selectinload(Order.payment))
+            .where(Order.id == order_id)
+        )
+        order = result.scalar_one_or_none()
+
+        if not order:
+            return
+
+        # Rider was found and assigned in time — nothing to do
+        if order.status != OrderStatus.READY_FOR_PICKUP:
+            return
+
+        # No rider found in time — cancel and refund
+        order.status = OrderStatus.CANCELLED
+        order.cancellation_reason = CancellationReason.NO_RIDER_AVAILABLE
+        order.cancellation_note = (
+            "No rider available in the area. Your order has been cancelled."
+        )
+        order.cancelled_at = datetime.now(UTC)
+
+        if order.payment and order.payment.status == PaymentStatus.PAID:
+            order.payment.status = PaymentStatus.REFUNDED
+            order.payment.refunded_at = datetime.now(UTC)
+            # TODO Phase 6: implement refund
+
+        await create_notification(
+            user_id=order.user_id,
+            type=NotificationType.ORDER_CANCELLED,
+            reference_id=order.id,
+            title="Order Cancelled — No Rider Available",
+            content=(
+                "We couldn't find a rider for your order. "
+                "Your payment will be refunded shortly. We're sorry for the inconvenience."
+            ),
+            db=db,
+        )
+
+        await db.commit()

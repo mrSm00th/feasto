@@ -29,6 +29,7 @@ class CancellationReason(str, enum.Enum):
     RESTAURANT_TIMEOUT = "RESTAURANT_TIMEOUT"  # auto-cancel after no response
     CUSTOMER_CANCELLED = "CUSTOMER_CANCELLED"
     ITEM_UNAVAILABLE = "ITEM_UNAVAILABLE"
+    NO_RIDER_AVAILABLE = "NO_RIDER_AVAILABLE"
     SYSTEM_ERROR = "SYSTEM_ERROR"
 
 
@@ -56,11 +57,11 @@ class Order(Base):
     )
 
     # currently a place holder
-    # rider_id: Mapped[uuid.UUID | None] = mapped_column(
-    #     ForeignKey("riders.id"),
-    #     nullable=True,
-    #     index=True,
-    # )
+    rider_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("riders.id"),
+        nullable=True,
+        index=True,
+    )
 
     # Snapshots - source of truth for history
 
