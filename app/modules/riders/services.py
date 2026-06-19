@@ -1,7 +1,20 @@
 import math
+import uuid
 from datetime import UTC, datetime, timedelta
-from sqlalchemy import select
+from decimal import Decimal
+from typing import Optional
+
+from fastapi import HTTPException, status
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.core.config import settings
+from app.modules.notifications.models import NotificationType
+from app.modules.notifications.services import create_notification
+from app.modules.orders.models import CancellationReason, Order, OrderStatus
+from app.modules.payments.models import PaymentStatus
 from app.modules.riders.models import Rider, RiderProfileStatus
 
 # Constants
@@ -126,3 +139,117 @@ async def find_nearby_riders(
     # Sort: closest first, higher rated as tiebreaker
     riders_with_distance.sort(key=lambda t: (t[1], -float(t[0].avg_rating)))
     return riders_with_distance
+
+
+async def dispatch_order_to_riders(
+    order: Order,
+    db: AsyncSession,
+) -> bool:
+    """
+    Find nearby riders and notify them of a new delivery opportunity.
+    Returns True if at least one rider was notified, False if no riders
+    were found (triggers fallback: expand radius or mark unserviceable).
+
+    This function only NOTIFIES — it does not assign. Assignment happens
+    when the rider explicitly accepts via POST /rider/orders/{id}/accept.
+
+    """
+    restaurant = await db.get(
+        type(order.restaurant),  # avoids importing Restaurant directly
+        order.restaurant_id,
+    )
+    if not restaurant or restaurant.latitude is None:
+        return False
+
+    riders_with_distance = await find_nearby_riders(
+        float(restaurant.latitude),
+        float(restaurant.longitude),
+        db,
+    )
+
+    if not riders_with_distance:
+        # Expand radius and try once more
+        riders_with_distance = await find_nearby_riders(
+            float(restaurant.latitude),
+            float(restaurant.longitude),
+            db,
+            radius_km=MAX_SEARCH_RADIUS_KM,
+        )
+
+    if not riders_with_distance:
+        return False
+
+    # Notify top N candidates — they race to accept
+    top_candidates = riders_with_distance[:CANDIDATE_POOL_SIZE]
+
+    for rider, distance_km in top_candidates:
+        await create_notification(
+            user_id=rider.user_id,
+            type=NotificationType.RIDER_ASSIGNED,
+            reference_id=order.id,
+            title="New Delivery Available",
+            content=(
+                f"Pickup from {order.restaurant_name} — "
+                f"{distance_km:.1f}km away. ₹{order.delivery_fee} earnings."
+            ),
+            db=db,
+        )
+
+    return True
+
+
+async def assign_rider_to_order(
+    order_id: uuid.UUID,
+    rider: Rider,
+    db: AsyncSession,
+) -> Order:
+    """
+    Atomically assign a rider to an order.
+
+    Uses SELECT FOR UPDATE to lock the order row for the duration of
+    this transaction. If two riders accept simultaneously:
+        - First one acquires the lock, sees status=READY_FOR_PICKUP,
+          proceeds with assignment.
+        - Second one acquires the lock after first commits, sees
+          status=RIDER_ASSIGNED, raises 409 — order already taken.
+
+    """
+    # SELECT FOR UPDATE — locks this row until the transaction ends
+    result = await db.execute(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # By the time we reach here (after acquiring the lock), another
+    # rider may have already been assigned — check the current state
+    if order.status != OrderStatus.READY_FOR_PICKUP:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order has already been assigned to another rider",
+        )
+
+    now = datetime.now(UTC)
+
+    # Assign the rider to the order
+    order.rider_id = rider.id
+    order.status = OrderStatus.RIDER_ASSIGNED
+    order.rider_assigned_at = now
+
+    # Mark rider as no longer available for new orders
+    rider.is_available = False
+
+    await create_notification(
+        user_id=order.user_id,
+        type=NotificationType.RIDER_ASSIGNED,
+        reference_id=order.id,
+        title="Rider Assigned",
+        content=f"Your rider is on the way to pick up your order",
+        db=db,
+    )
+
+    await db.commit()
+    await db.refresh(order)
+    return order

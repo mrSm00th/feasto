@@ -75,5 +75,8 @@ class Settings(BaseSettings):
     # ferent key
     pii_encryption_key: str
 
+    # auto order cancle if rider not found for N minutes
+    rider_assignment_timeout_minutes: int = 10
+
 
 settings = Settings()

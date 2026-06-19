@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.notifications.models import NotificationType
@@ -19,8 +21,13 @@ from app.modules.orders.schemas import (
     RejectOrderSchema,
 )
 from app.modules.orders.services import get_order_owned_by_restaurant
+from app.modules.orders.tasks import check_rider_assignment_timeout
 from app.modules.restaurants.services import get_restaurant_owned_by
+from app.modules.riders.services import dispatch_order_to_riders
 from app.modules.users.models import User, UserRole
+
+logger = logging.getLogger(__name__)
+
 
 """"
     Handles the restaurant facing routes related to the orders
@@ -188,12 +195,44 @@ async def change_order_status_to_ready_for_pickup(
         type=NotificationType.ORDER_READY_FOR_PICKUP,
         reference_id=order.id,
         title="Order Ready for Pickup",
-        content="Your order is ready and waiting for pickup",
+        content="Your order is ready and waiting for a rider",
         db=db,
     )
 
-    # TODO: assign rider here (Phase 3)
-
     await db.commit()
     await db.refresh(order)
+
+    # Both of these happen AFTER commit — the order's READY_FOR_PICKUP
+    # status is safely stored regardless the below operations
+
+    # 1. Schedule the safety net first — before dispatch attempt.
+    check_rider_assignment_timeout.apply_async(
+        args=[str(order.id)],
+        countdown=settings.rider_assignment_timeout_minutes * 60,
+    )
+
+    # 2. Attempt immediate dispatch — notify nearby riders right now.
+    #    Runs after the timeout is scheduled so the safety net is always
+    #    in place, regardless of how dispatch goes.
+    try:
+        riders_found = await dispatch_order_to_riders(order, db)
+
+        if not riders_found:
+            logger.warning(
+                "No riders available for order %s — order will remain at "
+                "READY_FOR_PICKUP until a rider comes online or the "
+                "assignment timeout fires in %d minutes.",
+                order.id,
+                settings.rider_assignment_timeout_minutes,
+            )
+
+    except Exception:
+        # just logging the dispatch failure as it's non-fatal — the restaurant's action succeeded,
+        # the timeout task will handle cleanup if no rider ever comes.
+        logger.exception(
+            "Rider dispatch failed for order %s — order remains at "
+            "READY_FOR_PICKUP, timeout task will handle cleanup.",
+            order.id,
+        )
+
     return order
