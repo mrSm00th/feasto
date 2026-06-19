@@ -253,3 +253,30 @@ async def assign_rider_to_order(
     await db.commit()
     await db.refresh(order)
     return order
+
+
+async def get_rider_for_current_user(
+    user_id: uuid.UUID,
+    db: AsyncSession,
+) -> Rider:
+    """
+    Fetch the Rider profile for the currently authenticated user.
+    Used as the base ownership check in all rider-facing routes —
+    same principle as 'get_order_owned_by_restaurant'.
+    """
+    result = await db.execute(select(Rider).where(Rider.user_id == user_id))
+    rider = result.scalar_one_or_none()
+
+    if not rider:
+        raise HTTPException(
+            status_code=404,
+            detail="Rider profile not found",
+        )
+
+    if rider.status == RiderProfileStatus.SUSPENDED:
+        raise HTTPException(
+            status_code=403,
+            detail="Your rider account has been suspended",
+        )
+
+    return rider

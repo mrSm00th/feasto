@@ -57,11 +57,11 @@ class Order(Base):
     )
 
     # currently a place holder
-    # rider_id: Mapped[uuid.UUID | None] = mapped_column(
-    #     ForeignKey("riders.id"),
-    #     nullable=True,
-    #     index=True,
-    # )
+    rider_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("riders.id"),
+        nullable=True,
+        index=True,
+    )
 
     # Snapshots - source of truth for history
 
