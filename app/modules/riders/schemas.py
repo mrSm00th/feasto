@@ -33,3 +33,26 @@ class AvailableOrderSchema(BaseSchema):
     placed_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class OnlineStatusSchema(BaseModel):
+    go_online: bool
+
+
+class RiderProfileResponseSchema(BaseSchema):
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    profile_image: str | None
+    status: RiderProfileStatus
+    is_online: bool
+    is_available: bool
+    vehicle_type: VehicleType | None
+    vehicle_number: str | None
+    avg_rating: Decimal
+    total_reviews: int
+    total_deliveries: int
+    current_latitude: Decimal | None
+    current_longitude: Decimal | None
+    last_location_update: datetime | None
+    created_at: datetime

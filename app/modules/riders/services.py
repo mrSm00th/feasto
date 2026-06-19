@@ -280,3 +280,44 @@ async def get_rider_for_current_user(
         )
 
     return rider
+
+
+async def toggle_rider_online_status(
+    rider: Rider,
+    go_online: bool,
+    db: AsyncSession,
+) -> Rider:
+    """
+    Rider taps the online/offline toggle in their app.
+
+    Going online: sets is_online=True, is_available=True
+    Going offline: sets is_online=False, is_available=False
+        — a rider mid-delivery cannot go offline until they
+          deliver the current order.
+    """
+    if not go_online:
+        # Prevent going offline mid-delivery
+        result = await db.execute(
+            select(Order).where(
+                Order.rider_id == rider.id,
+                Order.status.in_(
+                    [
+                        OrderStatus.RIDER_ASSIGNED,
+                        OrderStatus.OUT_FOR_DELIVERY,
+                    ]
+                ),
+            )
+        )
+        active_order = result.scalar_one_or_none()
+        if active_order:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot go offline while an active delivery is in progress",
+            )
+
+    rider.is_online = go_online
+    rider.is_available = go_online
+
+    await db.commit()
+    await db.refresh(rider)
+    return rider

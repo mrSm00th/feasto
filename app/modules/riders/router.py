@@ -10,10 +10,20 @@ from sqlalchemy.orm import selectinload
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.orders.models import Order, OrderStatus
+from app.modules.orders.schemas import OrderResponseSchema
 from app.modules.restaurants.models import Restaurant
 from app.modules.riders.models import Rider
-from app.modules.riders.schemas import AvailableOrderSchema
-from app.modules.riders.services import get_rider_for_current_user
+from app.modules.riders.schemas import (  # LocationUpdateSchema,
+    AvailableOrderSchema,
+    OnlineStatusSchema,
+    RiderProfileResponseSchema,
+)
+from app.modules.riders.services import (  # mark_order_delivered,; mark_order_picked_up,; update_rider_location,
+    assign_rider_to_order,
+    find_nearby_riders,
+    get_rider_for_current_user,
+    toggle_rider_online_status,
+)
 from app.modules.users.models import User, UserRole
 
 router = APIRouter(prefix="/rider", tags=["rider"])
@@ -30,6 +40,29 @@ async def get_current_rider(
     raises 403 if the account is suspended.
     """
     return await get_rider_for_current_user(current_user.id, db)
+
+
+# Profile
+@router.get("/me", response_model=RiderProfileResponseSchema)
+async def get_my_rider_profile(
+    rider: Annotated[Rider, Depends(get_current_rider)],
+):
+    """Rider's own profile — no DB query needed, already fetched by dependency."""
+    return rider
+
+
+#  Availability toggle
+@router.patch("/status", response_model=RiderProfileResponseSchema)
+async def set_online_status(
+    data: OnlineStatusSchema,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Go online (ready to receive orders) or offline.
+    NOTE-Cannot go offline while a delivery is in progress.
+    """
+    return await toggle_rider_online_status(rider, data.go_online, db)
 
 
 # Available orders
