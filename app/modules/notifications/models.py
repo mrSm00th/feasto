@@ -9,21 +9,27 @@ from app.db.database import Base
 
 
 class NotificationType(str, enum.Enum):
-
+    # cuisine moderation (existing)
     CUISINE_APPROVED = "CUISINE_APPROVED"
     CUISINE_REJECTED = "CUISINE_REJECTED"
     CUISINE_REVOKED = "CUISINE_REVOKED"
 
-    # order lifecycle events
-    ORDER_PLACED = "ORDER_PLACED"  # to restaurant owner
-    ORDER_CONFIRMED = "ORDER_CONFIRMED"  # to customer
-    ORDER_PREPARING = "ORDER_PREPARING"
-    ORDER_READY_FOR_PICKUP = "ORDER_READY_FOR_PICKUP"
-    RIDER_ASSIGNED = "RIDER_ASSIGNED"
-    ORDER_PICKED_UP = "ORDER_PICKED_UP"
-    ORDER_DELIVERED = "ORDER_DELIVERED"
-    ORDER_REJECTED = "ORDER_REJECTED"  # to customer
-    ORDER_CANCELLED = "ORDER_CANCELLED"  # to customer (auto-cancel)
+    # order lifecycle — restaurant-facing
+    ORDER_PLACED = "ORDER_PLACED"                    # new order arrived
+
+    # order lifecycle — customer-facing
+    ORDER_CONFIRMED = "ORDER_CONFIRMED"               # restaurant accepted
+    ORDER_PREPARING = "ORDER_PREPARING"               # kitchen started
+    ORDER_READY_FOR_PICKUP = "ORDER_READY_FOR_PICKUP" # ready, waiting for rider
+    RIDER_ASSIGNED = "RIDER_ASSIGNED"                 # a rider has been locked in
+    ORDER_PICKED_UP = "ORDER_PICKED_UP"               # rider has the food
+    ORDER_DELIVERED = "ORDER_DELIVERED"               # complete
+    ORDER_REJECTED = "ORDER_REJECTED"                 # restaurant declined
+    ORDER_CANCELLED = "ORDER_CANCELLED"                # any auto-cancel path
+
+    # rider-facing — distinct from RIDER_ASSIGNED, this is a BROADCAST
+    # to candidates before anyone has actually accepted
+    NEW_DELIVERY_AVAILABLE = "NEW_DELIVERY_AVAILABLE"
 
 
 class Notification(Base):

@@ -22,6 +22,7 @@ from app.modules.riders.schemas import (
 from app.modules.riders.services import (
     assign_rider_to_order,
     get_rider_for_current_user,
+    mark_order_delivered,
     mark_order_picked_up,
     toggle_rider_online_status,
     update_rider_location,
@@ -236,3 +237,44 @@ async def confirm_pickup(
     the restaurant. Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
     """
     return await mark_order_picked_up(order_id, rider, db)
+
+
+@router.post("/orders/{order_id}/delivered", response_model=OrderResponseSchema)
+async def confirm_delivery(
+    order_id: uuid.UUID,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Rider confirms delivery complete.
+    - Order → DELIVERED
+    - COD orders: Payment → PAID
+    - Rider becomes available for new orders
+    - total_deliveries increments
+    """
+    return await mark_order_delivered(order_id, rider, db)
+
+
+@router.get("/orders/history", response_model=list[OrderResponseSchema])
+async def get_delivery_history(
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Past completed deliveries, newest first, paginated."""
+    result = await db.execute(
+        select(Order)
+        .options(
+            selectinload(Order.payment),
+            selectinload(Order.items),
+        )
+        .where(
+            Order.rider_id == rider.id,
+            Order.status == OrderStatus.DELIVERED,
+        )
+        .order_by(Order.delivered_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all()

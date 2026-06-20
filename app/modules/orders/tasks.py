@@ -134,4 +134,15 @@ async def _check_rider_assignment_timeout_async(order_id_str: str) -> None:
             db=db,
         )
 
+        # notifying restro- restaurant should know their prepared order was cancelled
+        restaurant = await db.get(type(order.restaurant), order.restaurant_id)
+        if restaurant:
+            await create_notification(
+                user_id=restaurant.owner_id,
+                type=NotificationType.ORDER_CANCELLED,
+                reference_id=order.id,
+                title="Order Cancelled — No Rider Found",
+                content=f"Order #{str(order.id)[:8]} was cancelled — no rider was available.",
+                db=db,
+            )
         await db.commit()
