@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,6 +20,7 @@ from app.modules.riders.schemas import (
     RiderProfileResponseSchema,
 )
 from app.modules.riders.services import (
+    assign_rider_to_order,
     get_rider_for_current_user,
     toggle_rider_online_status,
     update_rider_location,
@@ -152,7 +153,7 @@ async def get_available_orders(
     return response
 
 
-# Location updates 
+# Location updates
 @router.patch("/location", status_code=204)
 async def update_location(
     data: LocationUpdateSchema,
@@ -165,3 +166,26 @@ async def update_location(
     on a location ping to minimise response payload on every call.
     """
     await update_rider_location(rider, data.latitude, data.longitude, db)
+
+
+# Order lifecycle
+
+
+@router.post("/orders/{order_id}/accept", response_model=OrderResponseSchema)
+async def accept_order(
+    order_id: uuid.UUID,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Rider accepts a delivery. Uses SELECT FOR UPDATE at the DB level
+    to prevent two riders accepting the same order simultaneously.
+    If the order was already taken, returns 409.
+    """
+    if not rider.is_online or not rider.is_available:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must be online and available to accept orders",
+        )
+
+    return await assign_rider_to_order(order_id, rider, db)

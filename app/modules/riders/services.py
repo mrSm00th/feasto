@@ -216,7 +216,13 @@ async def assign_rider_to_order(
     """
     # SELECT FOR UPDATE — locks this row until the transaction ends
     result = await db.execute(
-        select(Order).where(Order.id == order_id).with_for_update()
+        select(Order)
+        .options(
+            selectinload(Order.items),
+            selectinload(Order.payment),
+        )
+        .where(Order.id == order_id)
+        .with_for_update()
     )
     order = result.scalar_one_or_none()
 
