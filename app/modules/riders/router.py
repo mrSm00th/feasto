@@ -17,6 +17,7 @@ from app.modules.riders.schemas import (
     AvailableOrderSchema,
     LocationUpdateSchema,
     OnlineStatusSchema,
+    RiderLocationResponseSchema,
     RiderProfileResponseSchema,
 )
 from app.modules.riders.services import (
@@ -278,3 +279,57 @@ async def get_delivery_history(
         .limit(limit)
     )
     return result.scalars().all()
+
+
+# route called by the customers front end to fetch riders location
+@router.get("/{order_id}/rider-location", response_model=RiderLocationResponseSchema)
+async def get_order_rider_location(
+    order_id: uuid.UUID,
+    current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Return the assigned rider's latest location for order tracking.
+
+    The location is only available once a rider has been assigned to the
+    order, and can only be viewed by the customer who placed the order.
+    """
+
+    result = await db.execute(
+        select(Order).where(
+            Order.id == order_id,
+            Order.user_id == current_user.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status not in (OrderStatus.RIDER_ASSIGNED, OrderStatus.OUT_FOR_DELIVERY):
+        raise HTTPException(
+            status_code=400,
+            detail="Rider location is not available for this order yet",
+        )
+
+    if not order.rider_id:
+        raise HTTPException(status_code=404, detail="No rider assigned to this order")
+
+    result = await db.execute(
+        select(Rider)
+        .options(selectinload(Rider.user))
+        .where(Rider.id == order.rider_id)
+    )
+    rider = result.scalar_one_or_none()
+
+    if not rider:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    return RiderLocationResponseSchema(
+        rider_first_name=rider.user.full_name.split()[0],
+        rider_profile_image=rider.profile_image,
+        vehicle_type=rider.vehicle_type,
+        current_latitude=rider.current_latitude,
+        current_longitude=rider.current_longitude,
+        last_location_update=rider.last_location_update,
+    )
