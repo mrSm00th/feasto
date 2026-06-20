@@ -71,7 +71,7 @@ async def get_application_owned_by_user(
 
 async def start_application(
     user: User,
-    city_id: uuid.UUID,
+    city_name: str,
     db: AsyncSession,
 ) -> RiderApplication:
     existing = await get_active_application_for_user(user.id, db)
@@ -82,7 +82,7 @@ async def start_application(
         )
 
     result = await db.execute(
-        select(City).where(City.id == city_id, City.status == CityStatus.ACTIVE)
+        select(City).where(City.name == city_name, City.status == CityStatus.ACTIVE)
     )
     city = result.scalar_one_or_none()
 

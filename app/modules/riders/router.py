@@ -22,6 +22,7 @@ from app.modules.riders.schemas import (
 from app.modules.riders.services import (
     assign_rider_to_order,
     get_rider_for_current_user,
+    mark_order_picked_up,
     toggle_rider_online_status,
     update_rider_location,
 )
@@ -189,3 +190,49 @@ async def accept_order(
         )
 
     return await assign_rider_to_order(order_id, rider, db)
+
+
+@router.get("/orders/active", response_model=OrderResponseSchema)
+async def get_active_order(
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Returns the rider's current in-progress order, if any.
+    A rider can only have one active order at a time.
+    """
+    result = await db.execute(
+        select(Order)
+        .options(selectinload(Order.items), selectinload(Order.payment))
+        .where(
+            Order.rider_id == rider.id,
+            Order.status.in_(
+                [
+                    OrderStatus.RIDER_ASSIGNED,
+                    OrderStatus.OUT_FOR_DELIVERY,
+                ]
+            ),
+        )
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="No active order found",
+        )
+
+    return order
+
+
+@router.post("/orders/{order_id}/pickup", response_model=OrderResponseSchema)
+async def confirm_pickup(
+    order_id: uuid.UUID,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Rider confirms they have physically picked up the order from
+    the restaurant. Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
+    """
+    return await mark_order_picked_up(order_id, rider, db)

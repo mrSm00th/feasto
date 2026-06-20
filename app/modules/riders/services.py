@@ -352,3 +352,51 @@ async def update_rider_location(
         )
     )
     await db.commit()
+
+
+async def mark_order_picked_up(
+    order_id: uuid.UUID,
+    rider: Rider,
+    db: AsyncSession,
+) -> Order:
+    """
+    Rider has physically picked up the order from the restaurant.
+    Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
+    """
+    result = await db.execute(
+        select(Order)
+        .options(
+            selectinload(Order.items),
+            selectinload(Order.payment),
+        )
+        .where(
+            Order.id == order_id,
+            Order.rider_id == rider.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status != OrderStatus.RIDER_ASSIGNED:
+        raise HTTPException(
+            status_code=409,
+            detail="Order must be in RIDER_ASSIGNED status before pickup",
+        )
+
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    order.picked_up_at = datetime.now(UTC)
+
+    await create_notification(
+        user_id=order.user_id,
+        type=NotificationType.ORDER_PICKED_UP,
+        reference_id=order.id,
+        title="Order Picked Up",
+        content="Your order is on its way!",
+        db=db,
+    )
+
+    await db.commit()
+    await db.refresh(order)
+    return order

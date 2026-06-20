@@ -52,7 +52,7 @@ async def create_rider_application(
     current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await start_application(current_user, data.city, db)
+    return await start_application(current_user, data.city_name, db)
 
 
 @router.get(
