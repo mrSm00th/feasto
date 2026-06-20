@@ -13,16 +13,16 @@ from app.modules.orders.models import Order, OrderStatus
 from app.modules.orders.schemas import OrderResponseSchema
 from app.modules.restaurants.models import Restaurant
 from app.modules.riders.models import Rider
-from app.modules.riders.schemas import (  # LocationUpdateSchema,
+from app.modules.riders.schemas import (
     AvailableOrderSchema,
+    LocationUpdateSchema,
     OnlineStatusSchema,
     RiderProfileResponseSchema,
 )
-from app.modules.riders.services import (  # mark_order_delivered,; mark_order_picked_up,; update_rider_location,
-    assign_rider_to_order,
-    find_nearby_riders,
+from app.modules.riders.services import (
     get_rider_for_current_user,
     toggle_rider_online_status,
+    update_rider_location,
 )
 from app.modules.users.models import User, UserRole
 
@@ -150,3 +150,18 @@ async def get_available_orders(
 
     response.sort(key=lambda o: o.estimated_distance_km or 999)
     return response
+
+
+# Location updates 
+@router.patch("/location", status_code=204)
+async def update_location(
+    data: LocationUpdateSchema,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    High-frequency endpoint — called every 3-5 seconds by the rider app.
+    Returns 204 No Content intentionally — as no response body needed
+    on a location ping to minimise response payload on every call.
+    """
+    await update_rider_location(rider, data.latitude, data.longitude, db)

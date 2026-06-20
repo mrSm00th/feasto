@@ -56,3 +56,8 @@ class RiderProfileResponseSchema(BaseSchema):
     current_longitude: Decimal | None
     last_location_update: datetime | None
     created_at: datetime
+
+
+class LocationUpdateSchema(BaseSchema):
+    latitude: Decimal = Field(ge=-90, le=90)
+    longitude: Decimal = Field(ge=-180, le=180)

@@ -321,3 +321,28 @@ async def toggle_rider_online_status(
     await db.commit()
     await db.refresh(rider)
     return rider
+
+
+async def update_rider_location(
+    rider: Rider,
+    latitude: Decimal,
+    longitude: Decimal,
+    db: AsyncSession,
+) -> None:
+    """
+    High-frequency endpoint — called every 3-5 seconds by the rider's app.
+    Only updates the three location-related fields.
+    Using execute(update()) instead of ORM attribute assignment to keep the
+    function light.
+
+    """
+    await db.execute(
+        update(Rider)
+        .where(Rider.id == rider.id)
+        .values(
+            current_latitude=latitude,
+            current_longitude=longitude,
+            last_location_update=datetime.now(UTC),
+        )
+    )
+    await db.commit()
