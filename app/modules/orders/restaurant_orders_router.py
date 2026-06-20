@@ -22,6 +22,7 @@ from app.modules.orders.schemas import (
 )
 from app.modules.orders.services import get_order_owned_by_restaurant
 from app.modules.orders.tasks import check_rider_assignment_timeout
+from app.modules.realtime.connection_manager import manager
 from app.modules.restaurants.services import get_restaurant_owned_by
 from app.modules.riders.services import dispatch_order_to_riders
 from app.modules.users.models import User, UserRole
@@ -98,6 +99,21 @@ async def accept_order(
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
     return order
 
 
@@ -133,6 +149,22 @@ async def reject_order(
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
+
     return order
 
 
@@ -167,6 +199,22 @@ async def change_order_status_to_preparing(
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
+
     return order
 
 
@@ -201,6 +249,21 @@ async def change_order_status_to_ready_for_pickup(
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
 
     # Both of these happen AFTER commit — the order's READY_FOR_PICKUP
     # status is safely stored regardless the below operations

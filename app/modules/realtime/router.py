@@ -16,57 +16,91 @@ router = APIRouter(tags=["realtime"])
 
 
 @router.websocket("/ws/restaurant/{restaurant_id}")
-async def restaurant_order_updates_ws(
+async def restaurant_feed(
     websocket: WebSocket,
     restaurant_id: uuid.UUID,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    token: str = Query(...),  # JWT passed as query param as ws cant set custom headers
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
 ):
-    # Verify the token belongs to the owner of this restaurant
     try:
         user = await get_current_user_ws(token, db)
-    except WebSocketException as exc:
-        # accept() before close() cause we need to send the error msg
-        # if we dont accept client will see a generic connection failed
+    except Exception:
         await websocket.accept()
-        await websocket.close(code=exc.code, reason=exc.reason)
+        await websocket.close(code=1008, reason="Invalid token")
         return
 
     if user.role != UserRole.RESTAURANT_OWNER:
         await websocket.accept()
-        await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION, reason="Not a restaurant owner"
-        )
+        await websocket.close(code=1008, reason="Not a restaurant owner")
         return
 
-    # verify user actually owns restaurant_id
-    result = await db.execute(
-        select(Restaurant).where(
-            Restaurant.id == restaurant_id, Restaurant.owner_id == user.id
-        )
-    )
-
-    restaurant = result.scalars().first()
-
-    if not restaurant:
-        await websocket.accept()
-        await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION,
-            reason="Restaurant not found for this user",
-        )
-        return
-
-    # accepting the ws and registering it
     await manager.connect(restaurant_id, websocket)
-
     try:
         while True:
-            # Keep the connection alive — we don't expect the client
-            # to send anything, but we must await something or the
-            # connection closes immediately
             await websocket.receive_text()
-
-    # when the client disconnects , this exception is raised automatically
-    # this signals us that the connection is closed
     except WebSocketDisconnect:
         manager.disconnect(restaurant_id, websocket)
+
+
+@router.websocket("/ws/rider")
+async def rider_feed(
+    websocket: WebSocket,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Riders connect here (no path param needed — keyed by their own
+    user_id) to receive NEW_DELIVERY_AVAILABLE pushes the instant
+    dispatch_order_to_riders() fires, instead of waiting for the next
+    poll of /rider/orders/available.
+    """
+    try:
+        user = await get_current_user_ws(token, db)
+    except Exception:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
+    if user.role != UserRole.RIDER:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Not a rider")
+        return
+
+    await manager.connect(user.id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user.id, websocket)
+
+
+@router.websocket("/ws/customer")
+async def customer_feed(
+    websocket: WebSocket,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Customer connects here (keyed by their own user_id) to receive
+    live order status pushes — ORDER_CONFIRMED, RIDER_ASSIGNED,
+    ORDER_PICKED_UP, ORDER_DELIVERED — as they happen, instead of
+    polling GET /orders/{id}.
+    """
+    try:
+        user = await get_current_user_ws(token, db)
+    except Exception:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Invalid token")
+        return
+
+    if user.role != UserRole.CUSTOMER:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Not a customer")
+        return
+
+    await manager.connect(user.id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user.id, websocket)
