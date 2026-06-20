@@ -197,3 +197,31 @@ async def get_reviews_given_by_user(
         .limit(limit)
     )
     return result.scalars().all(), total
+
+
+async def get_restaurant_reviews(
+    restaurant_id: uuid.UUID,
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 20,
+) -> tuple[list[Review], int]:
+    """Public — restaurant reviews shown on the restaurant's detail/browse page."""
+    count_result = await db.execute(
+        select(Review).where(
+            Review.reviewee_type == RevieweeType.RESTAURANT,
+            Review.reviewee_restaurant_id == restaurant_id,
+        )
+    )
+    total = len(count_result.scalars().all())
+
+    result = await db.execute(
+        select(Review)
+        .where(
+            Review.reviewee_type == RevieweeType.RESTAURANT,
+            Review.reviewee_restaurant_id == restaurant_id,
+        )
+        .order_by(Review.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all(), total

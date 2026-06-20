@@ -12,6 +12,7 @@ from app.modules.reviews.schemas import (
     SubmitReviewSchema,
 )
 from app.modules.reviews.services import (
+    get_restaurant_reviews,
     get_reviews_given_by_user,
     get_reviews_received_by_user,
     submit_review,
@@ -79,4 +80,18 @@ async def get_my_given_reviews(
 ):
     """Reviews given by the current user"""
     reviews, total = await get_reviews_given_by_user(current_user.id, db, skip, limit)
+    return ReviewListResponseSchema(total=total, reviews=reviews)
+
+
+@public_router.get("/{restaurant_id}/reviews", response_model=ReviewListResponseSchema)
+async def get_restaurant_reviews_public(
+    restaurant_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """
+    Public Route -Get public reviews for a restaurant
+    """
+    reviews, total = await get_restaurant_reviews(restaurant_id, db, skip, limit)
     return ReviewListResponseSchema(total=total, reviews=reviews)
