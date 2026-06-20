@@ -155,3 +155,45 @@ async def submit_review(
     await db.commit()
     await db.refresh(review)
     return review
+
+
+async def get_reviews_received_by_user(
+    user_id: uuid.UUID,
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 20,
+) -> tuple[list[Review], int]:
+    """Reviews left ABOUT a user — e.g. a rider checking their own reviews."""
+    count_result = await db.execute(
+        select(Review).where(Review.reviewee_user_id == user_id)
+    )
+    total = len(count_result.scalars().all())
+
+    result = await db.execute(
+        select(Review)
+        .where(Review.reviewee_user_id == user_id)
+        .order_by(Review.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all(), total
+
+
+async def get_reviews_given_by_user(
+    user_id: uuid.UUID,
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 20,
+) -> tuple[list[Review], int]:
+    """Reviews given by an user"""
+    count_result = await db.execute(select(Review).where(Review.reviewer_id == user_id))
+    total = len(count_result.scalars().all())
+
+    result = await db.execute(
+        select(Review)
+        .where(Review.reviewer_id == user_id)
+        .order_by(Review.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all(), total
