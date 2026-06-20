@@ -283,6 +283,8 @@ class Restaurant(Base):
         back_populates="restaurant",
     )
 
+    reviews: Mapped[list["Review"]] = relationship(back_populates="reviewee_restaurant")
+
     __table_args__ = (
         UniqueConstraint(
             owner_id, normalized_name, normalized_address_line_1, normalized_city

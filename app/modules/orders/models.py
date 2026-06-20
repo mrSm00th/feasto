@@ -254,6 +254,8 @@ class Order(Base):
         foreign_keys=[rider_id],
     )
 
+    reviews: Mapped[list["Review"]] = relationship(back_populates="order")
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"

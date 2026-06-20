@@ -215,6 +215,16 @@ class User(Base):
         uselist=False,
     )
 
+    reviews_given: Mapped[list["Review"]] = relationship(
+        back_populates="reviewer",
+        foreign_keys="[Review.reviewer_id]",
+    )
+
+    reviews_received: Mapped[list["Review"]] = relationship(
+        back_populates="reviewee_user",
+        foreign_keys="[Review.reviewee_user_id]",
+    )
+
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
