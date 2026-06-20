@@ -18,8 +18,8 @@ from app.modules.payments.models import PaymentStatus
 @celery_app.task(name="orders.check_order_timeout")
 def check_order_timeout(order_id_str: str) -> None:
     """
-    Celery entrypoint — must be sync.
-    Bridges into the async DB layer via asyncio.run().
+    Celery entry point must be sync.
+    since our routes are async, we call the async func inside this sync func
     """
     asyncio.run(_check_order_timeout_async(order_id_str))
 
@@ -81,12 +81,9 @@ async def _check_order_timeout_async(order_id_str: str) -> None:
 @celery_app.task(name="orders.check_rider_assignment_timeout")
 def check_rider_assignment_timeout(order_id_str: str) -> None:
     """
-    Fires N minutes after an order reaches READY_FOR_PICKUP.
-    If no rider has been assigned by then, auto-cancels the order
-    and refunds the customer.
 
-    Idempotent — if a rider was assigned in the meantime, the task
-    reads the updated status and exits without doing anything.
+    Runs N minutes after the order status is changed to READY_FOR_PICKUP.
+    If no rider is assigned by then, worker auto cancels the order
     """
     asyncio.run(_check_rider_assignment_timeout_async(order_id_str))
 

@@ -5,9 +5,9 @@ from fastapi import WebSocket
 
 class ConnectionManager:
     """
-    Tracks active WebSocket connections, keyed by an arbitrary UUID —
-    restaurant_id, user_id, or rider's user_id. The key's meaning is
-    decided by the caller, this class acts as a connection registry.
+    Stores WebSocket connections using a UUID as the key.
+
+    The UUID can be a user, restaurant or rider id.
     """
 
     def __init__(self):

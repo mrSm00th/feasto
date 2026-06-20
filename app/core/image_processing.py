@@ -29,9 +29,7 @@ class ImageProcessingError(Exception):
 
 def _decode_and_validate(content: bytes) -> Image.Image:
     """
-    Open, fully decode, and validate an image from raw bytes.
-    Raises ImageProcessingError for unrecognised or unsupported files.
-    Sets the decompression-bomb pixel limit before opening.
+    Open and validate an uploaded image.
     """
     Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
@@ -53,9 +51,7 @@ def _decode_and_validate(content: bytes) -> Image.Image:
 
 def _normalize_to_rgb(img: Image.Image) -> Image.Image:
     """
-    JPEG has no transparency support — flatten any alpha channel
-    onto a white background. Also converts any other non-RGB mode
-    (palette, greyscale) to RGB so img.save(format="JPEG") never fails.
+    Normalize image modes so the image can be saved as JPEG.
     """
     if img.mode in ("RGBA", "LA", "P"):
         background = Image.new("RGB", img.size, (255, 255, 255))
@@ -83,14 +79,7 @@ def _encode_jpeg(img: Image.Image) -> tuple[bytes, str]:
 
 def _image_key(entity_id: uuid.UUID, filename: str, prefix: str) -> str:
     """
-    Build a stable, collision-free storage key for any entity's image.
-    Callers supply the prefix that describes which entity type and
-    access tier this image belongs to.
-
-    Examples:
-        _image_key(restaurant_id, filename, "restaurants/covers")
-        _image_key(item_id,       filename, "restaurants/menu-items")
-        _image_key(application_id, filename, "rider-applications/identity")
+    Generate a storage key for an uploaded image.
     """
     return f"{prefix}/{entity_id}/{filename}"
 
@@ -103,12 +92,7 @@ def process_thumbnail(
     size: tuple[int, int] = THUMBNAIL_SIZE,
 ) -> tuple[bytes, str]:
     """
-    Validate, crop-to-fill a square, and re-encode as JPEG.
-
-    Use for: restaurant cover photos, food gallery images,
-    menu item photos, rider profile photos — anywhere a uniform
-    square crop is visually correct and losing the image edges
-    doesn't matter.
+    Create a square thumbnail and save it as JPEG.
 
     Returns (jpeg_bytes, filename).
     """
@@ -123,13 +107,9 @@ def process_document(
     max_size: tuple[int, int] = DOCUMENT_MAX_SIZE,
 ) -> tuple[bytes, str]:
     """
-    Validate, downscale to fit within max_size WITHOUT cropping,
-    and re-encode as JPEG. Aspect ratio is fully preserved and
-    the image is never upscaled.
+    Resize a document image without cropping.
 
-    Use for: identity proof images, license images, any document
-    where cropping could cut off meaningful content (text, photo,
-    corners, document number).
+    Aspect ratio is preserved and the image is never upscaled.
 
     Returns (jpeg_bytes, filename).
     """

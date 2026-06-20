@@ -80,7 +80,8 @@ async def accept_order(
 
     if order.status != OrderStatus.PLACED:
         raise HTTPException(
-            status_code=409, detail="Order cannot be accepted in its current state"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order cannot be accepted in its current state",
         )
 
     now = datetime.now(UTC)
@@ -128,7 +129,8 @@ async def reject_order(
 
     if order.status != OrderStatus.PLACED:
         raise HTTPException(
-            status_code=409, detail="Order cannot be rejected in its current state"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order cannot be rejected in its current state",
         )
 
     order.status = OrderStatus.CANCELLED
@@ -181,7 +183,7 @@ async def change_order_status_to_preparing(
 
     if order.status != OrderStatus.CONFIRMED:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Order must be CONFIRMED before moving to PREPARING",
         )
 
@@ -231,7 +233,7 @@ async def change_order_status_to_ready_for_pickup(
 
     if order.status != OrderStatus.PREPARING:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Order must be PREPARING before moving to READY_FOR_PICKUP",
         )
 
@@ -275,8 +277,7 @@ async def change_order_status_to_ready_for_pickup(
     )
 
     # 2. Attempt immediate dispatch — notify nearby riders right now.
-    #    Runs after the timeout is scheduled so the safety net is always
-    #    in place, regardless of how dispatch goes.
+
     try:
         riders_found = await dispatch_order_to_riders(order, db)
 
@@ -290,8 +291,7 @@ async def change_order_status_to_ready_for_pickup(
             )
 
     except Exception:
-        # just logging the dispatch failure as it's non-fatal — the restaurant's action succeeded,
-        # the timeout task will handle cleanup if no rider ever comes.
+
         logger.exception(
             "Rider dispatch failed for order %s — order remains at "
             "READY_FOR_PICKUP, timeout task will handle cleanup.",

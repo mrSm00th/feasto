@@ -54,9 +54,7 @@ class StorageBackend(ABC):
 
 class LocalStorage(StorageBackend):
     """
-    Local-disk backend. No real access control in dev — generate_signed_url
-    just returns the same path as public_url. Swap to S3 in production for
-    real signed URL behaviour on the private bucket.
+    Local storage backend used for development.
     """
 
     def __init__(self, base_dir: Path, url_prefix: str) -> None:
@@ -98,14 +96,12 @@ class LocalStorage(StorageBackend):
         return self.public_url(key)
 
 
-# ── AWS S3 / S3-compatible (production) ──────────────────────────────────
+#  AWS S3 / S3-compatible (for production)
 
 
 class S3Storage(StorageBackend):
     """
-    S3-compatible backend. bucket is passed explicitly — one instance
-    always targets one bucket. Public/private split happens at the factory
-    level, not inside this class.
+    Stores files in an S3 bucket.
     """
 
     def __init__(self, bucket: str) -> None:
@@ -173,14 +169,8 @@ class S3Storage(StorageBackend):
         return await run_in_threadpool(self._generate_signed_url_sync, key, expires_in)
 
 
-# ── Factories ─────────────────────────────────────────────────────────────
-
-
 def get_public_storage() -> StorageBackend:
-    """
-    For content shown to any user: menu images, restaurant photos,
-    rider profile photos (after approval).
-    """
+
     backend = getattr(settings, "storage_backend", "local")
     if backend == "s3":
         return S3Storage(bucket=settings.s3_public_bucket_name)
@@ -192,8 +182,7 @@ def get_public_storage() -> StorageBackend:
 
 def get_private_storage() -> StorageBackend:
     """
-    For sensitive documents: identity proofs, license images.
-    Never publicly readable — access only via generate_signed_url().
+    Returns the private storage backend.
     """
     backend = getattr(settings, "storage_backend", "local")
     if backend == "s3":
@@ -206,10 +195,7 @@ def get_private_storage() -> StorageBackend:
 
 def get_storage() -> StorageBackend:
     """
-    Backward-compatible alias — returns the public storage backend.
-    Existing callers that don't need the public/private distinction
-    can keep using this unchanged. New code handling sensitive documents
-    should call get_private_storage() explicitly.
+    Returns the default storage backend.
     """
     return get_public_storage()
 
@@ -223,9 +209,7 @@ async def upload_processed_image(
     key: str,
 ) -> None:
     """
-    Upload pre-processed JPEG bytes to storage with consistent error handling.
-    Raises HTTPException 502 on storage failure — caller does not need
-    its own try/except for the upload step.
+    Upload processed image bytes and handle storage errors.
     """
     from fastapi import HTTPException
 
@@ -239,13 +223,12 @@ async def upload_processed_image(
         ) from exc
 
 
-# ── Cleanup helper ────────────────────────────────────────────────────────
+# Cleanup helper
 
 
 async def _cleanup_keys(storage: StorageBackend, keys: list[str]) -> None:
     """
-    Delete storage objects without raising — used in error-recovery paths
-    after a DB commit fails, to remove orphaned uploaded files.
+    Best-effort cleanup for uploaded files.
     """
     results = await asyncio.gather(
         *[storage.delete(k) for k in keys],

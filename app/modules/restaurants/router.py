@@ -1660,8 +1660,9 @@ async def demote_primary_cuisine(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    Unsets the primary cuisine flag for a restaurant without removing the mapping.
-    Use this before removing the primary cuisine or reassigning a new one.
+    Remove the primary cuisine flag from a restaurant cuisine.
+
+    Use this before assigning a different primary cuisine.
     """
     result = await db.execute(
         select(Restaurant.id).where(

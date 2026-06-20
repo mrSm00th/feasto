@@ -48,16 +48,6 @@ class DayOfWeek(str, enum.Enum):
     SUNDAY = "SUNDAY"
 
 
-# class RestaurantStatus(str, enum.Enum):
-#     DRAFT = "DRAFT"
-#     BASIC_INFO_ADDED = "BASIC_INFO_ADDED"
-#     DOCUMENTS_ADDED = "DOCUMENTS_ADDED"
-#     MENU_ADDED = "MENU_ADDED"
-#     SUBMITTED = "SUBMITTED"
-#     ACTIVE = "ACTIVE"
-#     SUSPENDED = "SUSPENDED"
-
-
 class RestaurantStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     BASIC_INFO_ADDED = "BASIC_INFO_ADDED"
@@ -182,7 +172,6 @@ class Restaurant(Base):
 
     # when the owner temporarily closes the restaurant for the day or for a specific period
     # they can set this flag to true. This will help in hiding the restaurant from the customers during that period.
-    # rename this column
     is_manually_paused: Mapped[bool] = mapped_column(
         Boolean,
         default=False,

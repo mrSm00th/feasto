@@ -49,10 +49,7 @@ async def rider_feed(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Riders connect here (no path param needed — keyed by their own
-    user_id) to receive NEW_DELIVERY_AVAILABLE pushes the instant
-    dispatch_order_to_riders() fires, instead of waiting for the next
-    poll of /rider/orders/available.
+    Riders connect here to get new delivery requests.
     """
     try:
         user = await get_current_user_ws(token, db)
@@ -81,10 +78,7 @@ async def customer_feed(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Customer connects here (keyed by their own user_id) to receive
-    live order status pushes — ORDER_CONFIRMED, RIDER_ASSIGNED,
-    ORDER_PICKED_UP, ORDER_DELIVERED — as they happen, instead of
-    polling GET /orders/{id}.
+    Customer websocket for order updates like confirmed, picked up and delivered.
     """
     try:
         user = await get_current_user_ws(token, db)

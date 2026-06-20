@@ -71,7 +71,7 @@ async def initiate_payment(
         raise HTTPException(status_code=404, detail="Payment record not found")
 
     #    If order already has a provider_order_id, return it — not creating duplicate
-    #    This is for handling the case where user hits "pay" twice
+    #    handling the case where user hits "pay" twice
     if payment.provider_order_id:
         return InitiatePaymentResponseSchema(
             razorpay_order_id=payment.provider_order_id,
@@ -81,7 +81,7 @@ async def initiate_payment(
             order_id=order.id,
         )
 
-    #    Create Razorpay order — run sync SDK call in thread pool
+    #    Creating Razorpay order
     #    amount is in paise (1 INR = 100 paise)
 
     try:
@@ -126,12 +126,12 @@ async def razorpay_webhook(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     # Reading raw body - as raw bytes are needed for HMAC calculation
-    # parsing JSON first may result in differed bytes
+    # parsing JSON first may change the bytes
     raw_body = await request.body()
 
-    # Verify webhook signature
+    # Verify webhook signature -
     #    Razorpay sends X-Razorpay-Signature in the header
-    #    recomputing the HMAC and comparing to know if they match
+    #    so by recomputing the HMAC and comparing them to know whether they match or not
 
     razorpay_signature = request.headers.get("X-Razorpay-Signature")
 
@@ -148,7 +148,7 @@ async def razorpay_webhook(
     ).hexdigest()
 
     # Using hmac.compare_digest as its timing-safe comparison
-    # Regular == comparison is vulnerable to timing attacks
+    # ot using Regular == comparison as its vulnerable to timing attacks
     if not hmac.compare_digest(expected_signature, razorpay_signature):
         raise HTTPException(status_code=400, detail="Invalid signature")
 

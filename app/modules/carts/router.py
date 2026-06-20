@@ -59,15 +59,18 @@ async def add_item_to_cart(
 
         if not item:
             raise HTTPException(
-                status_code=404, detail=f"Menu item {entry.menu_item_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Menu item {entry.menu_item_id} not found",
             )
         if item.restaurant_id != data.restaurant_id:
             raise HTTPException(
-                status_code=400, detail="Item does not belong to this restaurant"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Item does not belong to this restaurant",
             )
         if item.status != MenuItemStatus.ACTIVE or not item.is_available:
             raise HTTPException(
-                status_code=400, detail=f"'{item.name}' is not available"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{item.name}' is not available",
             )
 
     # Fetch existing cart
@@ -118,7 +121,10 @@ async def add_item_to_cart(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to update cart")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update cart",
+        )
 
     # Reload full cart with items after commit
     result = await db.execute(
@@ -230,7 +236,9 @@ async def reduce_cart_item_quantity(
     cart_item = result.scalar_one_or_none()
 
     if not cart_item:
-        raise HTTPException(status_code=404, detail="Cart item not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cart item not found"
+        )
 
     if cart_item.cart.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your cart")
@@ -239,7 +247,7 @@ async def reduce_cart_item_quantity(
 
     if data.quantity > cart_item.quantity:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot remove {data.quantity} units — only {cart_item.quantity} in cart",
         )
 
@@ -316,7 +324,9 @@ async def remove_cart_item(
     cart_item = result.scalar_one_or_none()
 
     if not cart_item:
-        raise HTTPException(status_code=404, detail="Cart item not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cart item not found"
+        )
 
     if cart_item.cart.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your cart")
@@ -386,7 +396,9 @@ async def clear_cart(
     cart = result.scalars().first()
 
     if not cart:  # guard against missing cart — db.delete(None) throws
-        raise HTTPException(status_code=404, detail="No cart found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No cart found"
+        )
 
     await db.delete(cart)
 
@@ -394,7 +406,10 @@ async def clear_cart(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to clear cart")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to clear cart",
+        )
 
 
 @router.post(
@@ -414,7 +429,9 @@ async def checkout(
     user_cart = result.scalar_one_or_none()
 
     if not user_cart or not user_cart.items:
-        raise HTTPException(status_code=400, detail="Your cart is empty")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Your cart is empty"
+        )
 
     cart_item_menu_ids = [item.menu_item_id for item in user_cart.items]
 
@@ -430,7 +447,8 @@ async def checkout(
 
     if not restaurant:
         raise HTTPException(
-            status_code=409, detail="This restaurant is no longer accepting orders"
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This restaurant is no longer accepting orders",
         )
 
     # 3. Validate address
@@ -443,7 +461,9 @@ async def checkout(
     address = result.scalar_one_or_none()
 
     if not address:
-        raise HTTPException(status_code=404, detail="Address not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Address not found"
+        )
 
     # 4. Fetch menu items
     result = await db.execute(
@@ -463,13 +483,14 @@ async def checkout(
 
         if not menu_item:
             raise HTTPException(
-                status_code=409,
+                status_code=status.HTTP_409_CONFLICT,
                 detail="A cart item is no longer available at this restaurant",
             )
 
         if menu_item.status != MenuItemStatus.ACTIVE or not menu_item.is_available:
             raise HTTPException(
-                status_code=409, detail=f"'{menu_item.name}' is no longer available"
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"'{menu_item.name}' is no longer available",
             )
 
         subtotal += menu_item.price * cart_item.quantity

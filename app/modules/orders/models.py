@@ -249,6 +249,11 @@ class Order(Base):
         foreign_keys=[address_id],
     )
 
+    rider: Mapped["Rider"] = relationship(
+        back_populates="orders",
+        foreign_keys=[rider_id],
+    )
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"
