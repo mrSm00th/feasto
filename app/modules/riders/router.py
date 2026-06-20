@@ -39,9 +39,10 @@ async def get_current_rider(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Rider:
     """
-    Shared dependency used by every rider-facing route.
-    Fetches the Rider profile, raises 404 if none exists,
-    raises 403 if the account is suspended.
+    shared dependency used by all rider facing endpoints.
+    fetches the rider object, if not found returns 404 and
+    403 if the account is suspended
+
     """
     return await get_rider_for_current_user(current_user.id, db)
 
@@ -51,7 +52,7 @@ async def get_current_rider(
 async def get_my_rider_profile(
     rider: Annotated[Rider, Depends(get_current_rider)],
 ):
-    """Rider's own profile — no DB query needed, already fetched by dependency."""
+    """Rider's me route to fetch the profile"""
     return rider
 
 
@@ -63,7 +64,7 @@ async def set_online_status(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    Go online (ready to receive orders) or offline.
+    Route to toggle the rider status between online and offline
     NOTE-Cannot go offline while a delivery is in progress.
     """
     return await toggle_rider_online_status(rider, data.go_online, db)
@@ -79,13 +80,10 @@ async def get_available_orders(
     radius_km: float = Query(default=5.0, ge=1.0, le=20.0),
 ):
     """
-    Returns READY_FOR_PICKUP orders near the rider's current location,
-    sorted by proximity. The rider uses this to see what's available and
-    proactively accept, separate from push notifications.
 
-    Note: not returning the full delivery address — only the
-    general area. Full address is in the order detail route, which the
-    rider can access only after accepting.
+    Returns the orders with the status READY_FOR_PICKUP near the rider sorted by the distance.
+
+    Note: not returning the full address of the delivery, showing just the approx area
     """
     if not rider.is_online:
         raise HTTPException(
@@ -157,16 +155,18 @@ async def get_available_orders(
 
 
 # Location updates
-@router.patch("/location", status_code=204)
+@router.patch(
+    "/location",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 async def update_location(
     data: LocationUpdateSchema,
     rider: Annotated[Rider, Depends(get_current_rider)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    High-frequency endpoint — called every 3-5 seconds by the rider app.
-    Returns 204 No Content intentionally — as no response body needed
-    on a location ping to minimise response payload on every call.
+    Route called by the rider app frequenty(every 3-5 sec) to update the riders current location.
+    Returning 204 as no body is needed and to make the route light for frequent calls
     """
     await update_rider_location(rider, data.latitude, data.longitude, db)
 
@@ -181,9 +181,8 @@ async def accept_order(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    Rider accepts a delivery. Uses SELECT FOR UPDATE at the DB level
-    to prevent two riders accepting the same order simultaneously.
-    If the order was already taken, returns 409.
+    Endpoint used by the rider to accept an order.
+    using 'select for update' to enforce to prevent two rider accepting same order simultaneously
     """
     if not rider.is_online or not rider.is_available:
         raise HTTPException(
@@ -200,8 +199,8 @@ async def get_active_order(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    Returns the rider's current in-progress order, if any.
-    A rider can only have one active order at a time.
+    Returns riders current active orders (if any).
+    A rider can have at most one active order
     """
     result = await db.execute(
         select(Order)
@@ -234,8 +233,8 @@ async def confirm_pickup(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    Rider confirms they have physically picked up the order from
-    the restaurant. Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
+    Route used by the rider to confirm the order pick up from the restaurant
+    changes the order status from: RIDER_ASSIGNED -> OUT_FOR_DELIVERY.
     """
     return await mark_order_picked_up(order_id, rider, db)
 
@@ -247,9 +246,9 @@ async def confirm_delivery(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
-    Rider confirms delivery complete.
-    - Order → DELIVERED
-    - COD orders: Payment → PAID
+    Rider confirms delivery.
+    -changes order status from: Order -> DELIVERED
+    -for COD orders, changes the payment status: Payment -> PAID
     - Rider becomes available for new orders
     - total_deliveries increments
     """
@@ -263,7 +262,7 @@ async def get_delivery_history(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ):
-    """Past completed deliveries, newest first, paginated."""
+    """Past completed deliveries of a rider sorted by newest first, paginated."""
     result = await db.execute(
         select(Order)
         .options(
