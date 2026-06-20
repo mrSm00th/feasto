@@ -1,3 +1,4 @@
+import logging
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,10 @@ from app.modules.notifications.models import NotificationType
 from app.modules.notifications.services import create_notification
 from app.modules.orders.models import CancellationReason, Order, OrderStatus
 from app.modules.payments.models import PaymentStatus
+from app.modules.realtime.connection_manager import manager
 from app.modules.riders.models import Rider, RiderProfileStatus
+
+logger = logging.getLogger(__name__)
 
 # Constants
 
@@ -195,6 +199,15 @@ async def dispatch_order_to_riders(
             db=db,
         )
 
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+
     return True
 
 
@@ -261,6 +274,22 @@ async def assign_rider_to_order(
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
+
     return order
 
 
@@ -402,6 +431,22 @@ async def mark_order_picked_up(
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
+
     return order
 
 
@@ -464,11 +509,26 @@ async def mark_order_delivered(
         content="Your order has been delivered. Enjoy your meal!",
         db=db,
     )
-
     # TODO Phase 6: create RiderEarning row
     # await create_rider_earning(rider_id=rider.id, order_id=order.id,
     #     amount=order.delivery_fee, db=db)
 
     await db.commit()
     await db.refresh(order)
+
+    try:
+        await manager.send_to(
+            order.user_id,
+            {
+                "type": "order_update",
+                "order_id": str(order.id),
+                "status": order.status.value,
+            },
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send order update for order %s",
+            order.id,
+        )
+
     return order
