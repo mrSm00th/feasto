@@ -14,7 +14,7 @@ from app.modules.rider_applications.models import (
 
 
 class StartApplicationSchema(BaseModel):
-    city: Annotated[str, Field(min_lenth=1, max_length=100)]
+    city_name: Annotated[str, Field(min_lenth=1, max_length=100)]
 
 
 class RiderApplicationResponseSchema(BaseModel):

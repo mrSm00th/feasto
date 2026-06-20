@@ -185,7 +185,7 @@ async def dispatch_order_to_riders(
     for rider, distance_km in top_candidates:
         await create_notification(
             user_id=rider.user_id,
-            type=NotificationType.RIDER_ASSIGNED,
+            type=NotificationType.NEW_DELIVERY_AVAILABLE,
             reference_id=order.id,
             title="New Delivery Available",
             content=(
@@ -216,12 +216,21 @@ async def assign_rider_to_order(
     """
     # SELECT FOR UPDATE — locks this row until the transaction ends
     result = await db.execute(
-        select(Order).where(Order.id == order_id).with_for_update()
+        select(Order)
+        .options(
+            selectinload(Order.items),
+            selectinload(Order.payment),
+        )
+        .where(Order.id == order_id)
+        .with_for_update()
     )
     order = result.scalar_one_or_none()
 
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
 
     # By the time we reach here (after acquiring the lock), another
     # rider may have already been assigned — check the current state
@@ -280,3 +289,186 @@ async def get_rider_for_current_user(
         )
 
     return rider
+
+
+async def toggle_rider_online_status(
+    rider: Rider,
+    go_online: bool,
+    db: AsyncSession,
+) -> Rider:
+    """
+    Rider taps the online/offline toggle in their app.
+
+    Going online: sets is_online=True, is_available=True
+    Going offline: sets is_online=False, is_available=False
+        — a rider mid-delivery cannot go offline until they
+          deliver the current order.
+    """
+    if not go_online:
+        # Prevent going offline mid-delivery
+        result = await db.execute(
+            select(Order).where(
+                Order.rider_id == rider.id,
+                Order.status.in_(
+                    [
+                        OrderStatus.RIDER_ASSIGNED,
+                        OrderStatus.OUT_FOR_DELIVERY,
+                    ]
+                ),
+            )
+        )
+        active_order = result.scalar_one_or_none()
+        if active_order:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot go offline while an active delivery is in progress",
+            )
+
+    rider.is_online = go_online
+    rider.is_available = go_online
+
+    await db.commit()
+    await db.refresh(rider)
+    return rider
+
+
+async def update_rider_location(
+    rider: Rider,
+    latitude: Decimal,
+    longitude: Decimal,
+    db: AsyncSession,
+) -> None:
+    """
+    High-frequency endpoint — called every 3-5 seconds by the rider's app.
+    Only updates the three location-related fields.
+    Using execute(update()) instead of ORM attribute assignment to keep the
+    function light.
+
+    """
+    await db.execute(
+        update(Rider)
+        .where(Rider.id == rider.id)
+        .values(
+            current_latitude=latitude,
+            current_longitude=longitude,
+            last_location_update=datetime.now(UTC),
+        )
+    )
+    await db.commit()
+
+
+async def mark_order_picked_up(
+    order_id: uuid.UUID,
+    rider: Rider,
+    db: AsyncSession,
+) -> Order:
+    """
+    Rider has physically picked up the order from the restaurant.
+    Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
+    """
+    result = await db.execute(
+        select(Order)
+        .options(
+            selectinload(Order.items),
+            selectinload(Order.payment),
+        )
+        .where(
+            Order.id == order_id,
+            Order.rider_id == rider.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status != OrderStatus.RIDER_ASSIGNED:
+        raise HTTPException(
+            status_code=409,
+            detail="Order must be in RIDER_ASSIGNED status before pickup",
+        )
+
+    order.status = OrderStatus.OUT_FOR_DELIVERY
+    order.picked_up_at = datetime.now(UTC)
+
+    await create_notification(
+        user_id=order.user_id,
+        type=NotificationType.ORDER_PICKED_UP,
+        reference_id=order.id,
+        title="Order Picked Up",
+        content="Your order is on its way!",
+        db=db,
+    )
+
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
+async def mark_order_delivered(
+    order_id: uuid.UUID,
+    rider: Rider,
+    db: AsyncSession,
+) -> Order:
+    """
+    Rider has delivered the order. This is the terminal happy-path state.
+
+    On delivery:
+        - Order transitions to DELIVERED
+        - For COD: Payment transitions to PAID (cash collected)
+        - Rider becomes available again for new orders
+        - Rider's total_deliveries increments
+
+    """
+    result = await db.execute(
+        select(Order)
+        .options(
+            selectinload(Order.payment),
+            selectinload(Order.items),
+        )
+        .where(
+            Order.id == order_id,
+            Order.rider_id == rider.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.status != OrderStatus.OUT_FOR_DELIVERY:
+        raise HTTPException(
+            status_code=409,
+            detail="Order must be OUT_FOR_DELIVERY before marking as delivered",
+        )
+
+    now = datetime.now(UTC)
+
+    order.status = OrderStatus.DELIVERED
+    order.delivered_at = now
+
+    # COD: cash was collected at the door — mark payment as received
+    if order.payment and order.payment.provider.value == "COD":
+        order.payment.status = PaymentStatus.PAID
+        order.payment.completed_at = now
+
+    # Rider is free to take new orders
+    rider.is_available = True
+    rider.total_deliveries += 1
+
+    await create_notification(
+        user_id=order.user_id,
+        type=NotificationType.ORDER_DELIVERED,
+        reference_id=order.id,
+        title="Order Delivered",
+        content="Your order has been delivered. Enjoy your meal!",
+        db=db,
+    )
+
+    # TODO Phase 6: create RiderEarning row
+    # await create_rider_earning(rider_id=rider.id, order_id=order.id,
+    #     amount=order.delivery_fee, db=db)
+
+    await db.commit()
+    await db.refresh(order)
+    return order

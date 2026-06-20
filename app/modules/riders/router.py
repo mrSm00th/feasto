@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -10,10 +10,23 @@ from sqlalchemy.orm import selectinload
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.orders.models import Order, OrderStatus
+from app.modules.orders.schemas import OrderResponseSchema
 from app.modules.restaurants.models import Restaurant
 from app.modules.riders.models import Rider
-from app.modules.riders.schemas import AvailableOrderSchema
-from app.modules.riders.services import get_rider_for_current_user
+from app.modules.riders.schemas import (
+    AvailableOrderSchema,
+    LocationUpdateSchema,
+    OnlineStatusSchema,
+    RiderProfileResponseSchema,
+)
+from app.modules.riders.services import (
+    assign_rider_to_order,
+    get_rider_for_current_user,
+    mark_order_delivered,
+    mark_order_picked_up,
+    toggle_rider_online_status,
+    update_rider_location,
+)
 from app.modules.users.models import User, UserRole
 
 router = APIRouter(prefix="/rider", tags=["rider"])
@@ -30,6 +43,29 @@ async def get_current_rider(
     raises 403 if the account is suspended.
     """
     return await get_rider_for_current_user(current_user.id, db)
+
+
+# Profile
+@router.get("/me", response_model=RiderProfileResponseSchema)
+async def get_my_rider_profile(
+    rider: Annotated[Rider, Depends(get_current_rider)],
+):
+    """Rider's own profile — no DB query needed, already fetched by dependency."""
+    return rider
+
+
+#  Availability toggle
+@router.patch("/status", response_model=RiderProfileResponseSchema)
+async def set_online_status(
+    data: OnlineStatusSchema,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Go online (ready to receive orders) or offline.
+    NOTE-Cannot go offline while a delivery is in progress.
+    """
+    return await toggle_rider_online_status(rider, data.go_online, db)
 
 
 # Available orders
@@ -117,3 +153,128 @@ async def get_available_orders(
 
     response.sort(key=lambda o: o.estimated_distance_km or 999)
     return response
+
+
+# Location updates
+@router.patch("/location", status_code=204)
+async def update_location(
+    data: LocationUpdateSchema,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    High-frequency endpoint — called every 3-5 seconds by the rider app.
+    Returns 204 No Content intentionally — as no response body needed
+    on a location ping to minimise response payload on every call.
+    """
+    await update_rider_location(rider, data.latitude, data.longitude, db)
+
+
+# Order lifecycle
+
+
+@router.post("/orders/{order_id}/accept", response_model=OrderResponseSchema)
+async def accept_order(
+    order_id: uuid.UUID,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Rider accepts a delivery. Uses SELECT FOR UPDATE at the DB level
+    to prevent two riders accepting the same order simultaneously.
+    If the order was already taken, returns 409.
+    """
+    if not rider.is_online or not rider.is_available:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must be online and available to accept orders",
+        )
+
+    return await assign_rider_to_order(order_id, rider, db)
+
+
+@router.get("/orders/active", response_model=OrderResponseSchema)
+async def get_active_order(
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Returns the rider's current in-progress order, if any.
+    A rider can only have one active order at a time.
+    """
+    result = await db.execute(
+        select(Order)
+        .options(selectinload(Order.items), selectinload(Order.payment))
+        .where(
+            Order.rider_id == rider.id,
+            Order.status.in_(
+                [
+                    OrderStatus.RIDER_ASSIGNED,
+                    OrderStatus.OUT_FOR_DELIVERY,
+                ]
+            ),
+        )
+    )
+    order = result.scalar_one_or_none()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="No active order found",
+        )
+
+    return order
+
+
+@router.post("/orders/{order_id}/pickup", response_model=OrderResponseSchema)
+async def confirm_pickup(
+    order_id: uuid.UUID,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Rider confirms they have physically picked up the order from
+    the restaurant. Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
+    """
+    return await mark_order_picked_up(order_id, rider, db)
+
+
+@router.post("/orders/{order_id}/delivered", response_model=OrderResponseSchema)
+async def confirm_delivery(
+    order_id: uuid.UUID,
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Rider confirms delivery complete.
+    - Order → DELIVERED
+    - COD orders: Payment → PAID
+    - Rider becomes available for new orders
+    - total_deliveries increments
+    """
+    return await mark_order_delivered(order_id, rider, db)
+
+
+@router.get("/orders/history", response_model=list[OrderResponseSchema])
+async def get_delivery_history(
+    rider: Annotated[Rider, Depends(get_current_rider)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Past completed deliveries, newest first, paginated."""
+    result = await db.execute(
+        select(Order)
+        .options(
+            selectinload(Order.payment),
+            selectinload(Order.items),
+        )
+        .where(
+            Order.rider_id == rider.id,
+            Order.status == OrderStatus.DELIVERED,
+        )
+        .order_by(Order.delivered_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return result.scalars().all()
