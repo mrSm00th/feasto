@@ -24,7 +24,7 @@ UTC = timezone.utc
 
 
 def ist_time_to_utc(t: time) -> time:
-    """Convert a naive time (assumed IST) to UTC time."""
+    """Convert a time from IST to UTC."""
     # Attach IST tzinfo, then convert to UTC
     from datetime import date, datetime
 
@@ -36,12 +36,9 @@ def ist_time_to_utc(t: time) -> time:
 
 async def generate_unique_slug(db: AsyncSession, name: str, city: str) -> str:
     """
-    Produce a URL-safe slug in the form  {name}-{city}  or
-    {name}-{city}-{n}  (n ≥ 2) if a collision exists.
+    Generate a unique slug for a restaurant.
 
-    The LIKE pre-filter keeps the query fast; the regex post-filter
-    ensures we only count exact variants, not unrelated restaurants
-    whose slug happens to share the same prefix.
+    If the slug already exists, add a number at the end.
     """
     base_slug = slugify(f"{name} {city}")
 
@@ -69,7 +66,7 @@ async def generate_unique_slug(db: AsyncSession, name: str, city: str) -> str:
 
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Return the distance in metres between two (lat, lon) points."""
+    """Calculate distance between two coordinates in meters."""
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon, dlat = lon2 - lon1, lat2 - lat1
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
@@ -78,9 +75,7 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 
 def _get_upsert_fn():
     """
-    Return the dialect-specific `insert` function.
-    Centralised here so every route stays dialect-agnostic.
-    Switch from SQLite to PostgreSQL by changing DATABASE_URL — no route changes.
+    Get the insert function based on the database being used.
     """
     db_url: str = settings.database_url
     if db_url.startswith("postgresql"):
@@ -96,9 +91,7 @@ async def _get_owned_restaurant(
     db: AsyncSession,
 ) -> Restaurant:
     """
-    Fetch a restaurant and verify ownership in one query.
-    Raises 404 for both "not found" and "not owned" — avoids leaking
-    the existence of restaurants owned by others.
+    Get a restaurant if it belongs to the current owner.
     """
     restaurant = await db.scalar(
         select(Restaurant).where(
@@ -118,7 +111,9 @@ def _build_availability_rows(
     restaurant_id: uuid.UUID,
     shifts: list,
 ) -> list[dict]:
-    """Convert validated schema entries into dicts for bulk upsert."""
+    """
+    Build availability rows for bulk insert/update.
+    """
     return [
         {
             "id": uuid.uuid4(),

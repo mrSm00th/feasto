@@ -17,6 +17,7 @@ from app.modules.notifications.services import create_notification
 from app.modules.orders.models import CancellationReason, Order, OrderStatus
 from app.modules.payments.models import PaymentStatus
 from app.modules.realtime.connection_manager import manager
+from app.modules.restaurants.models import Restaurant
 from app.modules.riders.models import Rider, RiderProfileStatus
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,9 @@ def _bounding_box(
 
     Over estimates the rider around the corners of actual circle
 
+    Enforcing/ assuming
     1 degree latitude ≈ 111km everywhere.
-    1 degree longitude ≈ 111km * cos(lat) — using this formula as long. shrinks around poles.
+    1 degree longitude ≈ 111km * cos(lat) — using this formula as longitute shrinks around poles.
     """
     lat_delta = radius_km / 111.0
     lon_delta = radius_km / (111.0 * math.cos(math.radians(lat)))
@@ -63,10 +65,8 @@ def haversine_km(
     lon2: float,
 ) -> float:
     """
-    Calculate the great-circle distance in kilometres between two points
-    on Earth using the Haversine formula. This is more accurate than
-    Euclidean distance for geographic coordinates, especially over longer
-    distances where the Earth's curvature matters.
+    calculates the actual distance between two points on the surface of a sphere.
+    Using this cause earth is a sphere. Uses the arc angle and the radius of the sphere
 
     """
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
@@ -89,13 +89,13 @@ async def find_nearby_riders(
     radius_km: float = DEFAULT_SEARCH_RADIUS_KM,
 ) -> list[tuple[Rider, float]]:
     """
-    Find available riders within radius_km of the pickup point.
+    This route finds the available riders around the pickup point within specified radius.
 
     Returns a list of (rider, distance_km) tuples sorted by:
         1. Distance ascending (closest first — primary sort)
         2. avg_rating descending (higher rated first — tiebreaker)
 
-    Two-level approach:
+    Using a Two-level approach:
         Level 1: Using Bounding Box- a db level approximate filtering
                 that over estimates the riders within the specified range
                 but filters most of the riders
@@ -103,10 +103,10 @@ async def find_nearby_riders(
         Level 2: Python-level Haversine calculation on the small
                  candidate set returned by level 1.
 
-    Stale-location guard: riders whose last_location_update is older
+    Enforcing A Stale-location guard: riders whose last_location_update is older
     than 5 minutes are treated as effectively offline regardless of
-    their is_online flag.
-    This handles app crashes without clean logout.
+    their is_online flag,for the cases when the rider's app crashes without proper logout.
+
     """
     staleness_cutoff = datetime.now(UTC) - timedelta(minutes=5)
     min_lat, max_lat, min_lon, max_lon = _bounding_box(
@@ -152,14 +152,14 @@ async def dispatch_order_to_riders(
     """
     Find nearby riders and notify them of a new delivery opportunity.
     Returns True if at least one rider was notified, False if no riders
-    were found (triggers fallback: expand radius or mark unserviceable).
+    were found.
 
     This function only NOTIFIES — it does not assign. Assignment happens
     when the rider explicitly accepts via POST /rider/orders/{id}/accept.
 
     """
     restaurant = await db.get(
-        type(order.restaurant),  # avoids importing Restaurant directly
+        type(order.restaurant),  # avoiding importing Restaurant directly
         order.restaurant_id,
     )
     if not restaurant or restaurant.latitude is None:
@@ -219,12 +219,9 @@ async def assign_rider_to_order(
     """
     Atomically assign a rider to an order.
 
-    Uses SELECT FOR UPDATE to lock the order row for the duration of
-    this transaction. If two riders accept simultaneously:
-        - First one acquires the lock, sees status=READY_FOR_PICKUP,
-          proceeds with assignment.
-        - Second one acquires the lock after first commits, sees
-          status=RIDER_ASSIGNED, raises 409 — order already taken.
+    Using 'SELECT FOR UPDATE' to lock the db row to protect from the case when two
+    riders access the db row at the same time to accept the order
+
 
     """
     # SELECT FOR UPDATE — locks this row until the transaction ends
@@ -299,8 +296,8 @@ async def get_rider_for_current_user(
 ) -> Rider:
     """
     Fetch the Rider profile for the currently authenticated user.
-    Used as the base ownership check in all rider-facing routes —
-    same principle as 'get_order_owned_by_restaurant'.
+    Used as the base ownership check in all rider-facing routes
+
     """
     result = await db.execute(select(Rider).where(Rider.user_id == user_id))
     rider = result.scalar_one_or_none()
@@ -326,12 +323,13 @@ async def toggle_rider_online_status(
     db: AsyncSession,
 ) -> Rider:
     """
+    Route used by the rider to toggle his online/offline status.
     Rider taps the online/offline toggle in their app.
 
     Going online: sets is_online=True, is_available=True
     Going offline: sets is_online=False, is_available=False
-        — a rider mid-delivery cannot go offline until they
-          deliver the current order.
+    enforcing that a rider mid-delivery cannot go offline until they
+    deliver the current order.
     """
     if not go_online:
         # Prevent going offline mid-delivery
@@ -368,10 +366,8 @@ async def update_rider_location(
     db: AsyncSession,
 ) -> None:
     """
-    High-frequency endpoint — called every 3-5 seconds by the rider's app.
-    Only updates the three location-related fields.
-    Using execute(update()) instead of ORM attribute assignment to keep the
-    function light.
+
+    Frequently called endpoint- called by the rider's app to update the riders location every 3-5 sec
 
     """
     await db.execute(
@@ -393,7 +389,7 @@ async def mark_order_picked_up(
 ) -> Order:
     """
     Rider has physically picked up the order from the restaurant.
-    Transitions: RIDER_ASSIGNED → OUT_FOR_DELIVERY.
+    changes the order status from: RIDER_ASSIGNED -> OUT_FOR_DELIVERY.
     """
     result = await db.execute(
         select(Order)
@@ -429,6 +425,17 @@ async def mark_order_picked_up(
         db=db,
     )
 
+    restaurant = await db.get(Restaurant, order.restaurant_id)
+    if restaurant:
+        await create_notification(
+            user_id=restaurant.owner_id,
+            type=NotificationType.ORDER_DELIVERED,
+            reference_id=order.id,
+            title="Order Delivered",
+            content=f"Order #{str(order.id)[:8]} was delivered successfully.",
+            db=db,
+        )
+
     await db.commit()
     await db.refresh(order)
 
@@ -456,7 +463,7 @@ async def mark_order_delivered(
     db: AsyncSession,
 ) -> Order:
     """
-    Rider has delivered the order. This is the terminal happy-path state.
+    Rider has delivered the order.
 
     On delivery:
         - Order transitions to DELIVERED
@@ -509,6 +516,18 @@ async def mark_order_delivered(
         content="Your order has been delivered. Enjoy your meal!",
         db=db,
     )
+
+    restaurant = await db.get(Restaurant, order.restaurant_id)
+    if restaurant:
+        await create_notification(
+            user_id=restaurant.owner_id,
+            type=NotificationType.ORDER_PICKED_UP,
+            reference_id=order.id,
+            title="Order Picked Up by Rider",
+            content=f"Order #{str(order.id)[:8]} has been collected for delivery.",
+            db=db,
+        )
+
     # TODO Phase 6: create RiderEarning row
     # await create_rider_earning(rider_id=rider.id, order_id=order.id,
     #     amount=order.delivery_fee, db=db)

@@ -89,9 +89,6 @@ class Rider(Base):
         Boolean,
         nullable=False,
         default=False,
-        # True: rider is online AND not currently mid-delivery
-        # Order matching queries: WHERE is_online=True AND is_available=True
-        # Set to False when rider accepts an order, True again on delivery complete
     )
 
     # Rider's Live location
@@ -111,7 +108,6 @@ class Rider(Base):
         nullable=True,
         # Used to detect stale location — if now() - last_location_update > 5 min,
         # treat rider as effectively offline even if is_online=True.
-        # Happens when the rider's app crashes without a clean logout.
     )
 
     # Vehicle (copied from RiderApplication at approval time)
@@ -135,8 +131,6 @@ class Rider(Base):
         Numeric(3, 2),  # 0.00 – 5.00, two decimal places
         nullable=False,
         default=Decimal("0.00"),
-        # Denormalized for query performance. Must be updated atomically
-        # alongside total_reviews whenever a new review row is inserted.
         # Formula: new_avg = ((old_avg * old_count) + new_rating) / new_count
     )
 
@@ -168,7 +162,13 @@ class Rider(Base):
 
     # Relationships
 
-    user: Mapped["User"] = relationship(back_populates="rider")
+    user: Mapped["User"] = relationship(
+        back_populates="rider",
+    )
+
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="rider",
+    )
 
     # Indexes
 

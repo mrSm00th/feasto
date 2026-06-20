@@ -25,6 +25,7 @@ from app.modules.admins.schemas import (
     RejectionReason,
     RevocationReason,
 )
+from app.modules.notifications.models import Notification, NotificationType
 from app.modules.partner_applications.models import (
     ApplicationStatus,
     PartnerApplication,
@@ -294,50 +295,41 @@ async def pending_cuisine_detailed_view(
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: AsyncSession = Depends(get_db),
 ):
-
     result = await db.execute(select(CuisineRequest).where(CuisineRequest.id == id))
-
-    pending_cuisine = result.scalars().first()
+    pending_cuisine = result.scalar_one_or_none()
 
     if not pending_cuisine:
-
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Cuisine request not found",
         )
 
-    words = pending_cuisine.cuisine_name.split()
-
-    condition = [word for word in words if len(word) > 3]
-
     similar_approved_cuisines = []
     similar_pending_cuisines = []
-    total_requests = 0
 
-    if condition:
+    search_terms = [
+        word for word in pending_cuisine.cuisine_name.split() if len(word) > 3
+    ]
 
+    if search_terms:
+        # Similar approved cuisines
         result = await db.execute(
             select(CuisineType)
             .where(
                 CuisineType.status == CuisineStatus.ACTIVE,
                 or_(
-                    *[CuisineType.cuisine_name.ilike(f"%{word}%") for word in condition]
+                    *[
+                        CuisineType.cuisine_name.ilike(f"%{word}%")
+                        for word in search_terms
+                    ]
                 ),
             )
             .limit(10)
         )
 
-        ## NOTE: use this query for production with postgres
-        # result = await db.execute(
-        #     select(CuisineType)
-        #     .where(CuisineType.status == CuisineStatus.PENDING)
-        #     .order_by(
-        #         func.similarity(CuisineType.cuisine_name, pending_cuisine.cuisine_name).desc()
-        #     )
-        # )
-
         similar_approved_cuisines = result.scalars().all()
 
+        # Similar pending requests
         result = await db.execute(
             select(CuisineRequest)
             .where(
@@ -345,31 +337,22 @@ async def pending_cuisine_detailed_view(
                 or_(
                     *[
                         CuisineRequest.cuisine_name.ilike(f"%{word}%")
-                        for word in condition
+                        for word in search_terms
                     ]
                 ),
             )
             .limit(10)
         )
 
-        ## NOTE: use this query for production with postgres
-        # result = await db.execute(
-        #     select(CuisineRequest)
-        #     .where(CuisinCuisineRequeste.id != pending_cuisine.id)
-        #     .order_by(
-        #         func.similarity(CuisineRequest.cuisine_name, pending_cuisine.cuisine_name).desc()
-        #     )
-        # )
-
         similar_pending_cuisines = result.scalars().all()
 
-    result_count = await db.execute(
+    result = await db.execute(
         select(func.count())
         .select_from(RestaurantCuisineMapping)
         .where(RestaurantCuisineMapping.request_id == pending_cuisine.id)
     )
 
-    total_requests = result_count.scalar() or 0
+    request_count = result.scalar() or 0
 
     return {
         "id": pending_cuisine.id,
@@ -377,7 +360,7 @@ async def pending_cuisine_detailed_view(
         "cuisine_name": pending_cuisine.cuisine_name,
         "cuisine_slug": pending_cuisine.cuisine_slug,
         "created_at": pending_cuisine.created_at,
-        "request_count": total_requests,
+        "request_count": request_count,
         "similar_approved_cuisines": similar_approved_cuisines,
         "similar_pending_cuisines": similar_pending_cuisines,
     }

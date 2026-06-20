@@ -54,10 +54,6 @@ class RejectApplicationSchema(BaseModel):
 
 
 class RiderApplicationAdminDetailSchema(RiderApplicationResponseSchema):
-    """
-    Extends the standard response with decrypted PII — only ever
-    returned from the admin-only detail route, never the list route.
-    """
 
     identity_proof_number: str
     license_number: str

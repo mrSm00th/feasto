@@ -22,7 +22,7 @@ class OrderItemResponseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ── Payment (nested inside order response) ─────────────────────────────────
+# Payment (nested inside order response)
 
 
 class PaymentResponseSchema(BaseModel):
@@ -40,7 +40,7 @@ class PaymentResponseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ── Order ────────────────────────────────────────────────────────────────
+# Order
 
 
 class OrderResponseSchema(BaseModel):
@@ -90,7 +90,7 @@ class OrderResponseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ── Restaurant-facing: incoming order list ──────────────────────────────────
+# Restaurant-facing: incoming order list
 
 
 class IncomingOrdersResponseSchema(BaseModel):
@@ -98,7 +98,7 @@ class IncomingOrdersResponseSchema(BaseModel):
     orders: list[OrderResponseSchema]
 
 
-# ── Restaurant-facing: accept / reject ──────────────────────────────────────
+# Restaurant-facing: accept / reject ─
 
 
 class AcceptOrderSchema(BaseModel):

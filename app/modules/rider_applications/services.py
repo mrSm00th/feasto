@@ -30,7 +30,10 @@ async def _read_upload(image: UploadFile) -> bytes:
     file_bytes = await image.read()
 
     if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(status_code=400, detail="File must be smaller than 8MB")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be smaller than 8MB",
+        )
 
     return file_bytes
 
@@ -64,7 +67,10 @@ async def get_application_owned_by_user(
     application = result.scalar_one_or_none()
 
     if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
 
     return application
 
@@ -115,7 +121,7 @@ async def add_identity_proof(
         RiderApplicationStatus.IDENTITY_PROOF_ADDED,
     ):
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Identity proof can only be added at this stage of the application",
         )
 
@@ -124,7 +130,10 @@ async def add_identity_proof(
     try:
         processed_bytes, filename = process_document(raw_bytes)
     except ImageProcessingError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
     storage = get_private_storage()
     key = f"rider-applications/{application.id}/identity-proof-{filename}"
@@ -256,7 +265,7 @@ async def submit_for_review(
 ) -> RiderApplication:
     if application.status != RiderApplicationStatus.VEHICLE_DETAILS_ADDED:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="All steps must be completed before submitting for review",
         )
 
@@ -274,17 +283,20 @@ async def approve_rider_application(
     db: AsyncSession,
 ) -> RiderApplication:
     """
-    Owns the entire approval transaction: flips application status,
-    promotes the user's role, creates the operational Rider profile,
-    and moves the profile photo from the private bucket into the
-    public bucket so it can be shown to customers tracking a delivery.
+    Approve a rider application.
+
+    This creates the rider profile, updates the user's role,
+    and makes the profile image publicly accessible.
     """
     from app.modules.riders.models import (
         Rider,
     )  # local import — avoids circular dependency
 
     if application.status != RiderApplicationStatus.PENDING_REVIEW:
-        raise HTTPException(status_code=409, detail="Application is not pending review")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application is not pending review",
+        )
 
     # Move profile photo: private (onboarding) → public (operational)
     private_storage = get_private_storage()
@@ -306,7 +318,7 @@ async def approve_rider_application(
         await public_storage.upload(image_bytes, public_key, content_type="image/jpeg")
     except Exception as exc:
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             # detail="Failed to finalize rider profile photo. Please try approving again.",
             detail=str(exc),
         )
@@ -338,7 +350,10 @@ async def reject_rider_application(
     db: AsyncSession,
 ) -> RiderApplication:
     if application.status != RiderApplicationStatus.PENDING_REVIEW:
-        raise HTTPException(status_code=409, detail="Application is not pending review")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application is not pending review",
+        )
 
     application.status = RiderApplicationStatus.REJECTED
     application.reviewed_by = admin.id

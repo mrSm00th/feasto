@@ -148,7 +148,7 @@ async def submit_application_for_review(
     return await submit_for_review(application, db)
 
 
-# ── Admin-facing ─────────────────────────────────────────────────────────
+# Admin-facing routes
 
 
 @admin_router.get("", response_model=IncomingRiderApplicationsResponseSchema)

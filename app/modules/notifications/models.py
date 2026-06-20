@@ -27,8 +27,6 @@ class NotificationType(str, enum.Enum):
     ORDER_REJECTED = "ORDER_REJECTED"  # restaurant declined
     ORDER_CANCELLED = "ORDER_CANCELLED"  # any auto-cancel path
 
-    # rider-facing — distinct from RIDER_ASSIGNED, this is a BROADCAST
-    # to candidates before anyone has actually accepted
     NEW_DELIVERY_AVAILABLE = "NEW_DELIVERY_AVAILABLE"
 
 

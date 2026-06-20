@@ -22,7 +22,6 @@ from app.db.database import Base
 
 class UserRole(str, enum.Enum):
     CUSTOMER = "CUSTOMER"
-    # PENDING_PARTNER = "PENDING_PARTNER"
     RESTAURANT_OWNER = "RESTAURANT_OWNER"
     RIDER = "RIDER"
     ADMIN = "ADMIN"
