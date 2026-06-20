@@ -61,3 +61,15 @@ class RiderProfileResponseSchema(BaseSchema):
 class LocationUpdateSchema(BaseSchema):
     latitude: Decimal = Field(ge=-90, le=90)
     longitude: Decimal = Field(ge=-180, le=180)
+
+
+# schema for sharing the rider location with customer
+class RiderLocationResponseSchema(BaseModel):
+    rider_first_name: str
+    rider_profile_image: str | None
+    vehicle_type: VehicleType | None
+    current_latitude: Decimal | None
+    current_longitude: Decimal | None
+    last_location_update: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
