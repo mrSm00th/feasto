@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -170,6 +172,14 @@ class Rider(Base):
         back_populates="rider",
     )
 
+    earnings: Mapped[list["RiderEarning"]] = relationship(
+        back_populates="rider",
+    )
+
+    payouts: Mapped[list["Payout"]] = relationship(
+        back_populates="rider",
+    )
+
     # Indexes
 
     __table_args__ = (
@@ -188,5 +198,144 @@ class Rider(Base):
             "idx_riders_location",
             "current_latitude",
             "current_longitude",
+        ),
+    )
+
+
+class EarningStatus(str, enum.Enum):
+    PENDING = "PENDING"  # delivered, accrued, not yet in a payout batch
+    PAID_OUT = "PAID_OUT"  # included in a completed payout
+    REVERSED = "REVERSED"  # earning was clawed back (e.g. order disputed
+    # after payout already initiated
+
+
+class PayoutStatus(str, enum.Enum):
+    PENDING = "PENDING"  # batch created, not yet sent to bank/Razorpay
+    PROCESSING = "PROCESSING"  # sent to Razorpay Payouts, awaiting confirmation
+    COMPLETED = "COMPLETED"  # confirmed transferred
+    FAILED = "FAILED"  # transfer failed — requires manual review
+
+
+class RiderEarning(Base):
+
+    __tablename__ = "rider_earnings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    rider_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("riders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("orders.id"),
+        nullable=False,
+        unique=True,
+        # one earning row per order
+    )
+
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    status: Mapped[EarningStatus] = mapped_column(
+        Enum(EarningStatus),
+        default=EarningStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+
+    payout_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("payouts.id"),
+        nullable=True,
+        index=True,
+        # set when this earning is swept into a payout batch
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    #  Relationships
+
+    rider: Mapped["Rider"] = relationship(back_populates="earnings")
+    order: Mapped["Order"] = relationship()
+    payout: Mapped["Payout | None"] = relationship(back_populates="earnings")
+
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_rider_earning_amount_positive"),
+        Index("idx_rider_earnings_rider_status", "rider_id", "status"),
+        # composite index — the payout job's core query is
+        # "all PENDING earnings for a given rider", this serves it directly
+    )
+
+
+class Payout(Base):
+
+    __tablename__ = "payouts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    rider_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("riders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+    status: Mapped[PayoutStatus] = mapped_column(
+        Enum(PayoutStatus),
+        default=PayoutStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+
+    # Razorpay Payouts API reference
+    provider_payout_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True
+    )
+
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Relationships
+
+    rider: Mapped["Rider"] = relationship(back_populates="payouts")
+    earnings: Mapped[list["RiderEarning"]] = relationship(back_populates="payout")
+
+    __table_args__ = (
+        CheckConstraint("total_amount > 0", name="ck_payout_total_amount_positive"),
+        CheckConstraint("period_end > period_start", name="ck_payout_period_valid"),
+        UniqueConstraint(
+            "rider_id",
+            "period_start",
+            "period_end",
+            name="uq_payout_rider_period",
+            # prevents the payout job from accidentally running twice
+            # for the same rider and the same week if triggered twice
         ),
     )

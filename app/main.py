@@ -64,7 +64,8 @@ app.include_router(rider_applications.router)
 app.include_router(admmin_rider_application.admin_router)
 app.include_router(riders.router)
 
-from app.modules.reviews.router import router as review_router, my_reviews_router, public_router
+from app.modules.reviews.router import my_reviews_router, public_router
+from app.modules.reviews.router import router as review_router
 
 app.include_router(review_router, prefix="/api")
 app.include_router(my_reviews_router, prefix="/api")
