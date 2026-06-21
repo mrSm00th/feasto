@@ -1,11 +1,13 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from geoalchemy2 import Geography
+from geoalchemy2.functions import ST_Distance, ST_DWithin, ST_MakePoint, ST_SetSRID
+from sqlalchemy import cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.modules.restaurants.models import Restaurant
+from app.modules.restaurants.models import Restaurant, RestaurantStatus
 
 
 async def get_restaurant_with_owner(
@@ -54,3 +56,24 @@ async def get_restaurant_owned_by(
         )
 
     return restaurant
+
+
+async def find_restaurants_near(
+    lat: float,
+    lon: float,
+    db: AsyncSession,
+    radius_km: float = 10.0,
+) -> list[tuple[Restaurant, float]]:
+    point = cast(ST_SetSRID(ST_MakePoint(lon, lat), 4326), Geography)
+    distance_expr = ST_Distance(Restaurant.location, point)
+
+    result = await db.execute(
+        select(Restaurant, distance_expr.label("distance_m"))
+        .where(
+            Restaurant.status == RestaurantStatus.ACTIVE,
+            Restaurant.location.isnot(None),
+            ST_DWithin(Restaurant.location, point, radius_km * 1000),
+        )
+        .order_by(distance_expr.asc())
+    )
+    return [(r, d / 1000.0) for r, d in result.all()]

@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from geoalchemy2 import Geography
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -102,6 +103,11 @@ class Rider(Base):
 
     current_longitude: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 7),
+        nullable=True,
+    )
+
+    location: Mapped[str | None] = mapped_column(
+        Geography(geometry_type="POINT", srid=4326),
         nullable=True,
     )
 

@@ -1,8 +1,10 @@
+import logging
 import uuid
 from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from geoalchemy2.functions import ST_Distance
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,12 +24,15 @@ from app.modules.carts.schemas import (
     OrderResponseSchema,
 )
 from app.modules.menus.models import MenuItem, MenuItemStatus
+from app.modules.orders.pricing import calculate_delivery_fee
 from app.modules.orders.services import create_order_from_cart
 from app.modules.payments.models import PaymentProvider
 from app.modules.restaurants.models import Restaurant, RestaurantStatus
 from app.modules.users.models import User, UserRole
 
 router = APIRouter(prefix="/cart", tags=["cart"])
+
+logger = logging.getLogger(__name__)
 
 
 # ADD or UPDATE an item in the cart
@@ -498,7 +503,31 @@ async def checkout(
     # 6. Compute financials
     TAX_RATE = Decimal(str(settings.tax_rate))
     tax_amount = (subtotal * TAX_RATE).quantize(Decimal("0.01"))
-    delivery_fee = Decimal(str(settings.base_delivery_price))
+
+    if restaurant.location is None or address.location is None:
+        distance_km = None
+        logger.warning(
+            "Missing location data for delivery fee calc — restaurant=%s address=%s",
+            restaurant.id,
+            address.id,
+        )
+    else:
+        distance_expr = ST_Distance(Restaurant.location, Address.location)
+        result = await db.execute(
+            select(distance_expr)
+            .select_from(Restaurant)
+            .where(Restaurant.id == restaurant.id)
+            .where(Address.id == address.id)
+        )
+        distance_m = result.scalar()
+        distance_km = distance_m / 1000.0 if distance_m is not None else None
+
+    distance_delivery_fee = (
+        calculate_delivery_fee(distance_km=distance_km)
+        if distance_km is not None
+        else Decimal("0.00")
+    )
+    delivery_fee = Decimal(str(settings.base_delivery_price)) + distance_delivery_fee
     total_amount = subtotal + tax_amount + delivery_fee
 
     # 7. Build address snapshot
@@ -516,7 +545,8 @@ async def checkout(
         )
     )
 
-    # 8. Create order
+    # 8. Create order — all financial figures already finalized above,
+    # create_order_from_cart only persists them
     order = await create_order_from_cart(
         cart=user_cart,
         menu_item_map=menu_item_map,

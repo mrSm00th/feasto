@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from geoalchemy2 import Geography
 from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -56,6 +57,11 @@ class Address(Base):
     country: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
+    )
+
+    location: Mapped[str | None] = mapped_column(
+        Geography(geometry_type="POINT", srid=4326),
+        nullable=True,
     )
 
     latitude: Mapped[Decimal | None] = mapped_column(

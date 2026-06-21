@@ -62,9 +62,6 @@ class Settings(BaseSettings):
     menu_categories_per_page: int = 10
     menu_items_per_page: int = 10
 
-    # base delivery price - Cart
-    base_delivery_price: Decimal = Decimal("50.00")
-
     tax_rate: Decimal = Decimal("0.18")
 
     # celery settings
@@ -77,6 +74,15 @@ class Settings(BaseSettings):
 
     # auto order cancle if rider not found for N minutes
     rider_assignment_timeout_minutes: int = 10
+
+    # delivery fee settings
+
+    base_delivery_price: float = 20.0
+    delivery_free_radius_km: float = 2.0
+    delivery_near_rate_per_km: float = 8.0
+    delivery_far_threshold_km: float = 5.0
+    delivery_far_rate_per_km: float = 12.0
+    delivery_max_fee: float = 150.0
 
 
 settings = Settings()
