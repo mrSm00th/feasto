@@ -22,6 +22,7 @@ from app.modules.orders.schemas import (
 )
 from app.modules.orders.services import get_order_owned_by_restaurant
 from app.modules.orders.tasks import check_rider_assignment_timeout
+from app.modules.payments.services import initiate_refund
 from app.modules.realtime.connection_manager import manager
 from app.modules.restaurants.services import get_restaurant_owned_by
 from app.modules.riders.services import dispatch_order_to_riders
@@ -147,7 +148,12 @@ async def reject_order(
         db=db,
     )
 
-    # TODO: trigger refund (Phase 6 — refund integration)
+    # trigger refund
+    await initiate_refund(
+        order_id=order.id,
+        reason=f"Order rejected by restaurant: {data.reason}",
+        db=db,
+    )
 
     await db.commit()
     await db.refresh(order)

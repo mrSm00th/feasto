@@ -13,7 +13,9 @@ class PaymentStatus(str, enum.Enum):
     PENDING = "PENDING"  # awaiting payment capture
     PAID = "PAID"
     FAILED = "FAILED"
+    REFUND_PENDING = "REFUND_PENDING"
     REFUNDED = "REFUNDED"
+    REFUND_FAILED = "REFUND_FAILED"
 
 
 class PaymentProvider(str, enum.Enum):
