@@ -3,18 +3,18 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert
+from geoalchemy2 import Geography
+from geoalchemy2.functions import ST_Distance, ST_DWithin, ST_MakePoint, ST_SetSRID
+from sqlalchemy import cast, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.services import create_notification
-from app.modules.orders.models import CancellationReason, Order, OrderStatus
+from app.modules.orders.models import Order, OrderStatus
 from app.modules.payments.models import PaymentStatus
 from app.modules.realtime.connection_manager import manager
 from app.modules.restaurants.models import Restaurant
@@ -80,70 +80,33 @@ def haversine_km(
     return EARTH_RADIUS_KM * 2 * math.asin(math.sqrt(a))
 
 
-# Core matching logic
-
-
 async def find_nearby_riders(
     restaurant_lat: float,
     restaurant_lon: float,
     db: AsyncSession,
     radius_km: float = DEFAULT_SEARCH_RADIUS_KM,
 ) -> list[tuple[Rider, float]]:
-    """
-    This route finds the available riders around the pickup point within specified radius.
 
-    Returns a list of (rider, distance_km) tuples sorted by:
-        1. Distance ascending (closest first — primary sort)
-        2. avg_rating descending (higher rated first — tiebreaker)
-
-    Using a Two-level approach:
-        Level 1: Using Bounding Box- a db level approximate filtering
-                that over estimates the riders within the specified range
-                but filters most of the riders
-
-        Level 2: Python-level Haversine calculation on the small
-                 candidate set returned by level 1.
-
-    Enforcing A Stale-location guard: riders whose last_location_update is older
-    than 5 minutes are treated as effectively offline regardless of
-    their is_online flag,for the cases when the rider's app crashes without proper logout.
-
-    """
     staleness_cutoff = datetime.now(UTC) - timedelta(minutes=5)
-    min_lat, max_lat, min_lon, max_lon = _bounding_box(
-        restaurant_lat, restaurant_lon, radius_km
+    point = cast(
+        ST_SetSRID(ST_MakePoint(restaurant_lon, restaurant_lat), 4326), Geography
     )
+    distance_expr = ST_Distance(Rider.location, point)
 
-    # level-1: performs the bound box
     result = await db.execute(
-        select(Rider).where(
+        select(Rider, distance_expr.label("distance_m"))
+        .where(
             Rider.is_online.is_(True),
             Rider.is_available.is_(True),
             Rider.status == RiderProfileStatus.ACTIVE,
-            Rider.current_latitude.isnot(None),
-            Rider.current_longitude.isnot(None),
+            Rider.location.isnot(None),
             Rider.last_location_update >= staleness_cutoff,
-            Rider.current_latitude.between(min_lat, max_lat),
-            Rider.current_longitude.between(min_lon, max_lon),
+            ST_DWithin(Rider.location, point, radius_km * 1000),  # metres
         )
+        .order_by(distance_expr.asc(), Rider.avg_rating.desc())
     )
-    candidates = result.scalars().all()
 
-    # Level-2: precise Haversine filter
-    riders_with_distance: list[tuple[Rider, float]] = []
-    for rider in candidates:
-        distance = haversine_km(
-            restaurant_lat,
-            restaurant_lon,
-            float(rider.current_latitude),
-            float(rider.current_longitude),
-        )
-        if distance <= radius_km:
-            riders_with_distance.append((rider, distance))
-
-    # Sort: closest first, higher rated as tiebreaker
-    riders_with_distance.sort(key=lambda t: (t[1], -float(t[0].avg_rating)))
-    return riders_with_distance
+    return [(rider, distance_m / 1000.0) for rider, distance_m in result.all()]
 
 
 async def dispatch_order_to_riders(
