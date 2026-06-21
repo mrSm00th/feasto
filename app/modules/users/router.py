@@ -28,7 +28,7 @@ from app.modules.users.schemas import (
     UserPrivate,
 )
 
-router = APIRouter(prefix="/api/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post(

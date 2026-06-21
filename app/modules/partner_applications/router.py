@@ -23,7 +23,7 @@ from app.modules.partner_applications.schemas import (
 )
 from app.modules.users.models import User, UserRole
 
-router = APIRouter(prefix="/api/partner-applications", tags=["partner applications"])
+router = APIRouter(prefix="/partner-applications", tags=["partner applications"])
 
 
 @router.post(

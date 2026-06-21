@@ -30,7 +30,7 @@ from app.modules.payments.models import PaymentProvider
 from app.modules.restaurants.models import Restaurant, RestaurantStatus
 from app.modules.users.models import User, UserRole
 
-router = APIRouter(prefix="/cart", tags=["cart"])
+router = APIRouter(prefix="/carts", tags=["cart"])
 
 logger = logging.getLogger(__name__)
 

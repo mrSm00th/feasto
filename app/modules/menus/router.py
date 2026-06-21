@@ -63,7 +63,7 @@ from app.modules.restaurants.models import (
 from app.modules.users.models import User, UserRole
 
 router = APIRouter(
-    prefix="/api/restaurants",
+    prefix="/restaurants",
     tags=["menus"],
 )
 
