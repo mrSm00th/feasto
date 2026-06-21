@@ -1809,10 +1809,10 @@ async def discover_restaurants(
             id=r.id,
             name=r.name,
             cover_image=r.primary_image.image_url if r.primary_image else None,
-            cuisines=[m.cuisine.name for m in r.restaurant_cuisines],
+            cuisines=[m.cuisine.cuisine_name for m in r.restaurant_cuisines],
             avg_rating=r.avg_rating,
             total_reviews=r.total_reviews,
-            delivery_fee_estimate=r.delivery_fee_estimate,
+            # delivery_fee_estimate=r.delivery_fee_estimate, # later add this feature
             distance_km=getattr(r, "_distance_km", None),
         )
         for r in restaurants

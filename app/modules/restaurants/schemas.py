@@ -387,7 +387,7 @@ class RestaurantCardSchema(BaseSchema):
     cuisines: list[str]
     avg_rating: Decimal
     total_reviews: int
-    delivery_fee_estimate: Decimal | None
+    # delivery_fee_estimate: Decimal | None later add this feature
     distance_km: float | None = None
 
     model_config = ConfigDict(from_attributes=True)

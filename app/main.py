@@ -21,7 +21,7 @@ from app.modules.rider_applications import router as admmin_rider_application
 from app.modules.rider_applications import router as rider_applications
 from app.modules.riders import router as riders
 from app.modules.users import router as users
-
+from app.modules.riders import payout_router
 
 # generatings tables using alembic
 @asynccontextmanager
@@ -70,3 +70,5 @@ from app.modules.reviews.router import router as review_router
 app.include_router(review_router, prefix="/api")
 app.include_router(my_reviews_router, prefix="/api")
 app.include_router(public_router, prefix="/api")
+
+app.include_router(payout_router.router)
