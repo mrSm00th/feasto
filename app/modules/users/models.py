@@ -183,11 +183,6 @@ class User(Base):
         back_populates="user",
     )
 
-    reviews: Mapped[list["Review"]] = relationship(
-        back_populates="user",
-        foreign_keys="[Review.user_id]",
-    )
-
     # rider application relationships
     rider_applications: Mapped[list["RiderApplication"]] = relationship(
         back_populates="applicant",

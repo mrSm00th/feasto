@@ -19,6 +19,7 @@ from app.modules.payments.models import PaymentStatus
 from app.modules.realtime.connection_manager import manager
 from app.modules.restaurants.models import Restaurant
 from app.modules.riders.models import Rider, RiderProfileStatus
+from app.modules.riders.payout_services import create_rider_earning
 
 logger = logging.getLogger(__name__)
 
@@ -528,9 +529,10 @@ async def mark_order_delivered(
             db=db,
         )
 
-    # TODO Phase 6: create RiderEarning row
-    # await create_rider_earning(rider_id=rider.id, order_id=order.id,
-    #     amount=order.delivery_fee, db=db)
+    # create rider earning
+    await create_rider_earning(
+        rider_id=rider.id, order_id=order.id, amount=order.delivery_fee, db=db
+    )
 
     await db.commit()
     await db.refresh(order)
