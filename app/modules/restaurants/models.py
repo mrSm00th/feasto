@@ -285,6 +285,20 @@ class Restaurant(Base):
 
     reviews: Mapped[list["Review"]] = relationship(back_populates="reviewee_restaurant")
 
+    # payout related relationships
+    commission_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        nullable=False,
+        default=Decimal("0.1800"),  # 18% platform default — adjustable per restaurant
+    )
+
+    earnings: Mapped[list["RestaurantEarning"]] = relationship(
+        back_populates="restaurant"
+    )
+    payouts: Mapped[list["RestaurantPayout"]] = relationship(
+        back_populates="restaurant"
+    )
+
     __table_args__ = (
         UniqueConstraint(
             owner_id, normalized_name, normalized_address_line_1, normalized_city
