@@ -10,9 +10,7 @@ from app.db.database import AsyncSessionLocal
 from app.modules.notifications.models import NotificationType
 from app.modules.notifications.services import create_notification
 from app.modules.orders.models import CancellationReason, Order, OrderStatus
-
-# from app.modules.payments.service import refund_payment
-from app.modules.payments.models import PaymentStatus
+from app.modules.payments.services import initiate_refund
 
 
 @celery_app.task(name="orders.check_order_timeout")
@@ -39,11 +37,10 @@ async def _check_order_timeout_async(order_id_str: str) -> None:
             return
 
         # Nothing to do if the order already moved past these states —
-        # restaurant already responded, or payment already confirmed
+        # as restaurant already responded, or payment already confirmed
         if order.status not in (OrderStatus.PLACED, OrderStatus.AWAITING_PAYMENT):
             return
 
-        # Capture this BEFORE mutating status
         was_awaiting_payment = order.status == OrderStatus.AWAITING_PAYMENT
 
         order.status = OrderStatus.CANCELLED
@@ -57,10 +54,11 @@ async def _check_order_timeout_async(order_id_str: str) -> None:
             order.cancellation_reason = CancellationReason.RESTAURANT_TIMEOUT
             order.cancellation_note = "Restaurant did not respond in time"
 
-            if order.payment and order.payment.status == PaymentStatus.PAID:
-                order.payment.status = PaymentStatus.REFUNDED
-                order.payment.refunded_at = datetime.now(UTC)
-                # TODO: actually call Razorpay refund API (Phase 6)
+            await initiate_refund(
+                order_id=order.id,
+                reason="Order auto-cancelled: restaurant did not respond in time",
+                db=db,
+            )
 
         await create_notification(
             user_id=order.user_id,
@@ -114,10 +112,11 @@ async def _check_rider_assignment_timeout_async(order_id_str: str) -> None:
         )
         order.cancelled_at = datetime.now(UTC)
 
-        if order.payment and order.payment.status == PaymentStatus.PAID:
-            order.payment.status = PaymentStatus.REFUNDED
-            order.payment.refunded_at = datetime.now(UTC)
-            # TODO Phase 6: implement refund
+        await initiate_refund(
+            order_id=order.id,
+            reason="Order auto-cancelled: no rider available",
+            db=db,
+        )
 
         await create_notification(
             user_id=order.user_id,
