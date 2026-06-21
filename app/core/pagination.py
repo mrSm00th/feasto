@@ -6,9 +6,13 @@ from uuid import UUID
 
 
 def encode_cursor(sort_value: Any, id_value: UUID) -> str:
-    
+
     payload = {
-        "v": sort_value.isoformat() if isinstance(sort_value, datetime) else str(sort_value),
+        "v": (
+            sort_value.isoformat()
+            if isinstance(sort_value, datetime)
+            else str(sort_value)
+        ),
         "id": str(id_value),
     }
     raw = json.dumps(payload).encode("utf-8")
@@ -22,4 +26,5 @@ def decode_cursor(cursor: str) -> tuple[str, UUID]:
         return payload["v"], UUID(payload["id"])
     except Exception:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=400, detail="Invalid pagination cursor")

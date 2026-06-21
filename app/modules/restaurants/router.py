@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from asyncio import gather
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from typing import Annotated, List
 
 from fastapi import (
@@ -62,10 +61,12 @@ from app.modules.restaurants.schemas import (
     DayHoursResponse,
     DayHoursUpdate,
     RestaurantByCityPaginatedResponse,
+    RestaurantCardSchema,
     RestaurantCreate,
     RestaurantCreateResponse,
     RestaurantCuisineListResponse,
     RestaurantCuisineRequestListResponse,
+    RestaurantDiscoveryResponseSchema,
     RestaurantDocumentsUpload,
     RestaurantDocumentsUploadResponse,
     RestaurantHoursResponse,
@@ -78,6 +79,7 @@ from app.modules.restaurants.schemas import (
     RestaurantPrimaryImageResponse,
     RestaurantSchema,
 )
+from app.modules.restaurants.services import discover_restaurants_service
 from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
     _get_owned_restaurant,
     generate_unique_slug,
@@ -915,7 +917,7 @@ async def resume_restaurant(
     return restaurant
 
 
-# ── PLANNED CLOSURE ───────────────────────────────────────
+# Planed closure of restaurant (eg for maintainance and stuff)
 
 
 @router.post(
@@ -1702,83 +1704,6 @@ async def demote_primary_cuisine(
         ) from exc
 
 
-@router.get("/", response_model=RestaurantByCityPaginatedResponse)
-async def get_all_restaurants_for_city(
-    city: Annotated[str, Query(min_length=2, max_length=50)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = settings.restaurants_per_page,
-):
-    now = datetime.now(UTC)
-    current_time = now.astimezone(UTC).timetz()  # aware time in UTC, matches DB's +00
-    today_dow = now.isoweekday() - 1  # 0=Monday..6=Sunday
-
-    normalized = normalize(city)  # same normalize() used at creation time
-
-    # restaurants under active planned closure right now
-    active_closure_subquery = (
-        select(RestaurantClosure.restaurant_id)
-        .where(
-            RestaurantClosure.starts_at <= now,
-            (RestaurantClosure.ends_at.is_(None)) | (RestaurantClosure.ends_at > now),
-        )
-        .scalar_subquery()
-    )
-
-    filters = [
-        Restaurant.normalized_city
-        == normalized,  # correct: normalized input vs normalized column
-        Restaurant.status == RestaurantStatus.ACTIVE,
-        Restaurant.is_manually_paused.is_(False),  # manual pause check
-        Restaurant.id.not_in(active_closure_subquery),  # planned closure check
-        RestaurantAvailability.restaurant_id == Restaurant.id,
-        RestaurantAvailability.day_of_week == today_dow,
-        RestaurantAvailability.status == AvailabilityStatus.OPEN,
-        RestaurantAvailability.opening_time <= current_time,
-        RestaurantAvailability.closing_time > current_time,
-    ]
-
-    count_query = (
-        select(func.count(Restaurant.id))
-        .join(
-            RestaurantAvailability,
-            RestaurantAvailability.restaurant_id == Restaurant.id,
-        )
-        .where(*filters)
-    )
-
-    data_query = (
-        select(Restaurant)
-        .join(
-            RestaurantAvailability,
-            RestaurantAvailability.restaurant_id == Restaurant.id,
-        )
-        .options(
-            selectinload(Restaurant.primary_image),
-            selectinload(Restaurant.restaurant_cuisines).selectinload(
-                RestaurantCuisineMapping.cuisine
-            ),
-        )
-        .where(*filters)
-        .order_by(Restaurant.avg_rating.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-
-    total = await db.scalar(count_query)
-    data_result = await db.execute(data_query)
-
-    restaurants = data_result.scalars().all()
-
-    return RestaurantByCityPaginatedResponse(
-        restaurants=restaurants,
-        total=total or 0,
-        skip=skip,
-        limit=limit,
-        has_more=skip + len(restaurants) < (total or 0),
-    )
-
-
 @router.post(
     "/{restaurant_id}/activate",
 )
@@ -1847,3 +1772,52 @@ async def get_detailed_restaurant_by_id(
     restaurant = result.scalars().first()
 
     return restaurant
+
+
+# restaurants/router.py — single route, replaces both
+
+
+@router.get("/", response_model=RestaurantDiscoveryResponseSchema)
+async def discover_restaurants(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    lat: float | None = Query(default=None),
+    lon: float | None = Query(default=None),
+    city: str | None = Query(default=None, min_length=2, max_length=50),
+    cuisine_id: uuid.UUID | None = Query(default=None),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+
+    if lat is None and lon is None and city is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either lat/lon or city to discover restaurants",
+        )
+
+    restaurants, next_cursor, has_more = await discover_restaurants_service(
+        db,
+        lat=lat,
+        lon=lon,
+        city=city,
+        cuisine_id=cuisine_id,
+        cursor=cursor,
+        limit=limit,
+    )
+
+    cards = [
+        RestaurantCardSchema(
+            id=r.id,
+            name=r.name,
+            cover_image=r.primary_image.image_url if r.primary_image else None,
+            cuisines=[m.cuisine.name for m in r.restaurant_cuisines],
+            avg_rating=r.avg_rating,
+            total_reviews=r.total_reviews,
+            delivery_fee_estimate=r.delivery_fee_estimate,
+            distance_km=getattr(r, "_distance_km", None),
+        )
+        for r in restaurants
+    ]
+
+    return RestaurantDiscoveryResponseSchema(
+        restaurants=cards, next_cursor=next_cursor, has_more=has_more
+    )
