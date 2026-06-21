@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -16,5 +17,12 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
-# Auto-discover tasks in modules — looks for tasks.py in each listed module
+celery_app.conf.beat_schedule = {
+    "weekly-rider-payouts": {
+        "task": "riders.run_weekly_payouts",
+        "schedule": crontab(day_of_week=1, hour=3, minute=0),  # Monday 3 AM
+    },
+}
+
+# Auto-discover tasks in modules by looking for tasks.py in each listed module
 celery_app.autodiscover_tasks(["app.modules.orders"])

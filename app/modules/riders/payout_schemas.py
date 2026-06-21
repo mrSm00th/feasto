@@ -8,9 +8,11 @@ from pydantic import BaseModel, ConfigDict
 
 from app.modules.riders.models import EarningStatus, PayoutStatus
 
+
 class BaseSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class RiderEarningResponseSchema(BaseSchema):
     id: uuid.UUID
@@ -19,7 +21,6 @@ class RiderEarningResponseSchema(BaseSchema):
     status: EarningStatus
     payout_id: uuid.UUID | None
     created_at: datetime
-
 
 
 class PayoutResponseSchema(BaseSchema):
@@ -32,8 +33,6 @@ class PayoutResponseSchema(BaseSchema):
     period_end: datetime
     created_at: datetime
     completed_at: datetime | None
-
-  
 
 
 class RiderEarningsSummarySchema(BaseSchema):
