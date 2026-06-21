@@ -8,6 +8,7 @@ def load_models():
     import app.modules.partner_applications.models
     import app.modules.payments.models
     import app.modules.restaurants.models
+    import app.modules.restaurants.payout_models
     import app.modules.reviews.models
     import app.modules.rider_applications.models
     import app.modules.riders.models
