@@ -42,7 +42,7 @@ from app.modules.restaurants.models import (
 from app.modules.users.models import User, UserRole
 from app.modules.users.schemas import UserCreate, UserPrivate
 
-router = APIRouter(prefix="/api/admin", tags=["admins"])
+router = APIRouter(prefix="/admins", tags=["admins"])
 
 
 @router.post(

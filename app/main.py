@@ -17,8 +17,11 @@ from app.modules.partner_applications import router as partner_applications
 from app.modules.payments.router import router as payments_router
 from app.modules.realtime import router as realtime
 from app.modules.restaurants import router as restaurants
+from app.modules.reviews.router import my_reviews_router, public_router
+from app.modules.reviews.router import router as review_router
 from app.modules.rider_applications import router as admmin_rider_application
 from app.modules.rider_applications import router as rider_applications
+from app.modules.riders import payout_router
 from app.modules.riders import router as riders
 from app.modules.users import router as users
 
@@ -42,31 +45,32 @@ app.mount("/media", StaticFiles(directory="media"), name="media")
 load_models()
 
 
-app.include_router(users.router)
-app.include_router(partner_applications.router)
-app.include_router(admins.router)
-app.include_router(restaurants.router)
-app.include_router(menus.router)
-app.include_router(carts.router)
-app.include_router(addresses.router)
-app.include_router(payments_router)
+app.include_router(users.router, prefix="/api")
+app.include_router(partner_applications.router, prefix="/api")
+app.include_router(admins.router, prefix="/api")
+app.include_router(restaurants.router, prefix="/api")
+app.include_router(menus.router, prefix="/api")
+app.include_router(carts.router, prefix="/api")
+app.include_router(addresses.router, prefix="/api")
+app.include_router(payments_router, prefix="/api")
 app.include_router(
-    restaurant_orders.restaurant_orders_router
+    restaurant_orders.restaurant_orders_router,
+    prefix="/api",
 )  # handles the incomming orders and stuff
 app.include_router(
-    restaurant_orders.order_actions_router
+    restaurant_orders.order_actions_router,
+    prefix="/api",
 )  # handles acting upon that orders like acc / rej
-app.include_router(realtime.router)
-app.include_router(notifications.router)
-app.include_router(locations.router)
-app.include_router(customer_orders.router)
-app.include_router(rider_applications.router)
-app.include_router(admmin_rider_application.admin_router)
-app.include_router(riders.router)
-
-from app.modules.reviews.router import my_reviews_router, public_router
-from app.modules.reviews.router import router as review_router
+app.include_router(realtime.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
+app.include_router(locations.router, prefix="/api")
+app.include_router(customer_orders.router, prefix="/api")
+app.include_router(rider_applications.router, prefix="/api")
+app.include_router(admmin_rider_application.admin_router, prefix="/api")
+app.include_router(riders.router, prefix="/api")
 
 app.include_router(review_router, prefix="/api")
 app.include_router(my_reviews_router, prefix="/api")
 app.include_router(public_router, prefix="/api")
+
+app.include_router(payout_router.router, prefix="/api")

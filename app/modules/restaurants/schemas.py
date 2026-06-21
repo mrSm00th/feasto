@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC
 from datetime import date as date_type
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -375,4 +376,24 @@ class RestaurantByCityPaginatedResponse(BaseSchema):
     total: int
     skip: int
     limit: int
+    has_more: bool
+
+
+class RestaurantCardSchema(BaseSchema):
+
+    id: uuid.UUID
+    name: str
+    cover_image: str | None
+    cuisines: list[str]
+    avg_rating: Decimal
+    total_reviews: int
+    # delivery_fee_estimate: Decimal | None later add this feature
+    distance_km: float | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RestaurantDiscoveryResponseSchema(BaseSchema):
+    restaurants: list[RestaurantCardSchema]
+    next_cursor: str | None
     has_more: bool
