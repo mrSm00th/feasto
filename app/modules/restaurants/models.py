@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime, time
 from decimal import Decimal
 
+from geoalchemy2 import Geography
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -168,6 +169,11 @@ class Restaurant(Base):
         Numeric(10, 7),
         nullable=True,
         index=True,
+    )
+
+    location: Mapped[str | None] = mapped_column(
+        Geography(geometry_type="POINT", srid=4326),
+        nullable=True,
     )
 
     # when the owner temporarily closes the restaurant for the day or for a specific period
