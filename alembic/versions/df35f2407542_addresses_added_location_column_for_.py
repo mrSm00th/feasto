@@ -5,15 +5,16 @@ Revises: 5ba19aed112e
 Create Date: 2026-06-21 21:21:57.746312
 
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'df35f2407542'
-down_revision: Union[str, Sequence[str], None] = '5ba19aed112e'
+revision: str = "df35f2407542"
+down_revision: Union[str, Sequence[str], None] = "5ba19aed112e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -40,7 +41,9 @@ def upgrade() -> None:
         BEFORE INSERT OR UPDATE OF latitude, longitude ON addresses
         FOR EACH ROW EXECUTE FUNCTION sync_address_location();
     """)
-    op.execute("CREATE INDEX idx_addresses_location_gist ON addresses USING GIST (location)")
+    op.execute(
+        "CREATE INDEX idx_addresses_location_gist ON addresses USING GIST (location)"
+    )
     op.execute("UPDATE addresses SET latitude = latitude WHERE latitude IS NOT NULL")
 
 
