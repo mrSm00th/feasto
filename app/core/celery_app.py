@@ -20,7 +20,11 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {
     "weekly-rider-payouts": {
         "task": "riders.run_weekly_payouts",
-        "schedule": crontab(day_of_week=1, hour=3, minute=0),  # Monday 3 AM
+        "schedule": crontab(day_of_week=1, hour=3, minute=0),
+    },
+    "weekly-restaurant-payouts": {
+        "task": "restaurants.run_weekly_payouts",
+        "schedule": crontab(day_of_week=1, hour=4, minute=0),
     },
 }
 

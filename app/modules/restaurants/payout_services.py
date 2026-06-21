@@ -24,7 +24,7 @@ async def create_restaurant_earning(
     gross_amount: Decimal,
     db: AsyncSession,
 ) -> RestaurantEarning:
-    
+
     commission_amount = _round_money(gross_amount * restaurant.commission_rate)
     net_amount = _round_money(gross_amount - commission_amount)
 
@@ -41,7 +41,9 @@ async def create_restaurant_earning(
     return earning
 
 
-async def get_pending_earnings_total(restaurant_id: uuid.UUID, db: AsyncSession) -> Decimal:
+async def get_pending_earnings_total(
+    restaurant_id: uuid.UUID, db: AsyncSession
+) -> Decimal:
     result = await db.execute(
         select(func.coalesce(func.sum(RestaurantEarning.net_amount), 0)).where(
             RestaurantEarning.restaurant_id == restaurant_id,
@@ -89,9 +91,9 @@ async def get_restaurant_payouts(
     limit: int = 20,
 ) -> tuple[list[RestaurantPayout], int]:
     count_result = await db.execute(
-        select(func.count()).select_from(RestaurantPayout).where(
-            RestaurantPayout.restaurant_id == restaurant.id
-        )
+        select(func.count())
+        .select_from(RestaurantPayout)
+        .where(RestaurantPayout.restaurant_id == restaurant.id)
     )
     total = count_result.scalar() or 0
 
@@ -111,7 +113,7 @@ async def run_payout_batch_for_restaurant(
     period_end: datetime,
     db: AsyncSession,
 ) -> RestaurantPayout | None:
-    
+
     result = await db.execute(
         select(RestaurantEarning)
         .where(
@@ -147,8 +149,10 @@ async def run_payout_batch_for_restaurant(
     return payout
 
 
-async def initiate_restaurant_payout_transfer(payout: RestaurantPayout, db: AsyncSession) -> None:
-   
+async def initiate_restaurant_payout_transfer(
+    payout: RestaurantPayout, db: AsyncSession
+) -> None:
+
     payout.status = RestaurantPayoutStatus.PROCESSING
 
     # TODO:  RazorpayX payout call
