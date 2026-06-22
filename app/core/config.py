@@ -84,5 +84,8 @@ class Settings(BaseSettings):
     delivery_far_rate_per_km: float = 12.0
     delivery_max_fee: float = 150.0
 
+    # redis url
+    redis_url: str = "redis://localhost:6379/1"  # for caching db=1
+
 
 settings = Settings()

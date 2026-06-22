@@ -1,8 +1,10 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.core.redis_client import ping_redis
 from app.db.database import engine
 from app.db.models_registry import load_models
 from app.modules.addresses import router as addresses
@@ -25,16 +27,18 @@ from app.modules.riders import payout_router
 from app.modules.riders import router as riders
 from app.modules.users import router as users
 
+logger = logging.getLogger(__name__)
+
 
 # generatings tables using alembic
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    # STARTUP
-    # RUN APP
+async def lifespan(app: FastAPI):
+    redis_ok = await ping_redis()
+    if redis_ok:
+        logger.info("Redis connected — activated caching")
+    else:
+        logger.warning("Redis unavailable — running without cache")
     yield
-
-    # SHUTDOWN
-    await engine.dispose()
 
 
 app = FastAPI(lifespan=lifespan)
