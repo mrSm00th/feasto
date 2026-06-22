@@ -87,5 +87,13 @@ class Settings(BaseSettings):
     # redis url
     redis_url: str = "redis://localhost:6379/1"  # for caching db=1
 
+    # cache keys
+
+    CACHE_TTL_RESTAURANT_DETAIL = 60
+    CACHE_TTL_REVIEWS = 300
+    CACHE_TTL_CUISINE_LIST = 3600
+    CACHE_TTL_DISH_SEARCH = 60
+    CACHE_TTL_DISCOVERY_FEED = 30
+
 
 settings = Settings()
