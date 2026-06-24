@@ -76,9 +76,9 @@ class PrimaryImageUpdate(BaseSchema):
 
 class ShiftEntry(BaseSchema):
     """
-    status=OPEN          → opening_time and closing_time required
-    status=CLOSED        → times must be absent
-    status=OPEN_24_HOURS → times must be absent, shift_index must be 0
+    status=OPEN          -> opening_time and closing_time required
+    status=CLOSED        -> times must be absent
+    status=OPEN_24_HOURS -> times must be absent, shift_index must be 0
     """
 
     day_of_week: int = Field(..., ge=0, le=6)
@@ -112,8 +112,8 @@ class ShiftEntry(BaseSchema):
 
 class RestaurantHoursUpload(BaseSchema):
     hours: list[ShiftEntry] = Field(..., min_length=7, max_length=21)
-    # min 7 — one entry per day minimum
-    # max 21 — 7 days × 3 shifts max per day
+    # min 7 - one entry per day minimum
+    # max 21 - 7 days x 3 shifts max per day
 
     @model_validator(mode="after")
     def validate_no_duplicate_shifts(self) -> "RestaurantHoursUpload":
@@ -161,7 +161,6 @@ class RestaurantHoursUpload(BaseSchema):
 
 
 class DayHoursUpdate(BaseSchema):
-    """Replacement schedule for one specific day. All existing shifts are replaced."""
 
     shifts: list[ShiftEntry] = Field(..., min_length=1, max_length=3)
 
@@ -245,7 +244,6 @@ class ClosureResponse(BaseSchema):
 
 
 class CuisineResponse(BaseSchema):
-    """Single approved CuisineType — used in catalog listing."""
 
     id: uuid.UUID
     cuisine_name: str
@@ -253,7 +251,6 @@ class CuisineResponse(BaseSchema):
 
 
 class CuisineListResponse(BaseSchema):
-    """Paginated catalog of all approved cuisines."""
 
     cuisines: list[CuisineResponse]
     total: int
@@ -263,7 +260,7 @@ class CuisineListResponse(BaseSchema):
 
 
 class CreateCuisine(BaseSchema):
-    cuisine_name: str
+    cuisine_name: Annotated[str, Field(min_length=1, max_length=120)]
 
 
 class CuisineAdd(BaseSchema):
@@ -271,10 +268,6 @@ class CuisineAdd(BaseSchema):
 
 
 class CuisineMappingResponse(BaseSchema):
-    """
-    A restaurant's cuisine mapping row.
-    cuisine is None when status=PENDING_REVIEW (no CuisineType yet).
-    """
 
     id: uuid.UUID
     cuisine_id: uuid.UUID | None
@@ -286,7 +279,6 @@ class CuisineMappingResponse(BaseSchema):
 
 
 class CuisineAddResponse(BaseSchema):
-    """Returned after successfully adding an approved cuisine to a restaurant."""
 
     id: uuid.UUID
     cuisine_id: uuid.UUID
@@ -297,7 +289,6 @@ class CuisineAddResponse(BaseSchema):
 
 
 class RestaurantCuisineListResponse(BaseSchema):
-    """All cuisine mappings for a restaurant (active + pending)."""
 
     cuisines: list[CuisineMappingResponse]
     total: int
@@ -305,7 +296,6 @@ class RestaurantCuisineListResponse(BaseSchema):
 
 
 class RestaurantPendingCuisineItem(BaseSchema):
-    """A single pending cuisine request row joined with CuisineRequest details."""
 
     mapping_id: uuid.UUID
     request_id: uuid.UUID
@@ -317,7 +307,6 @@ class RestaurantPendingCuisineItem(BaseSchema):
 
 
 class RestaurantCuisineRequestListResponse(BaseSchema):
-    """All pending cuisine requests for a restaurant."""
 
     requests: list[RestaurantPendingCuisineItem]
     total: int
@@ -329,7 +318,6 @@ class RestaurantPrimaryCuisneRequest(BaseSchema):
 
 
 class RestaurantPrimaryCuisineResponse(BaseSchema):
-    """Returned after setting or changing the primary cuisine."""
 
     id: uuid.UUID
     cuisine_id: uuid.UUID
@@ -380,20 +368,92 @@ class RestaurantByCityPaginatedResponse(BaseSchema):
 
 
 class RestaurantCardSchema(BaseSchema):
-
     id: uuid.UUID
     name: str
     cover_image: str | None
     cuisines: list[str]
     avg_rating: Decimal
     total_reviews: int
-    # delivery_fee_estimate: Decimal | None later add this feature
-    distance_km: float | None = None
-
-    model_config = ConfigDict(from_attributes=True)
+    delivery_fee_estimate: Decimal | None
+    distance_km: float | None
 
 
 class RestaurantDiscoveryResponseSchema(BaseSchema):
     restaurants: list[RestaurantCardSchema]
     next_cursor: str | None
     has_more: bool
+
+
+# =========================
+# RESTAURANT DETAIL SCHEMAS
+# =========================
+
+
+class RestaurantDetailCuisineSchema(BaseSchema):
+    id: uuid.UUID
+    cuisine_name: str
+    cuisine_slug: str
+
+
+class RestaurantDetailPrimaryImageSchema(BaseSchema):
+    id: uuid.UUID
+    image_path: str
+
+
+class MenuItemImageSchema(BaseSchema):
+
+    id: uuid.UUID
+    image_url: str
+    alt_text: str | None = None
+
+
+class MenuItemSchema(BaseSchema):
+    id: uuid.UUID
+
+    name: str
+    description: str | None
+
+    price: Decimal
+    discounted_price: Decimal | None
+
+    veg_type: VegType
+    is_available: bool
+
+    preparation_time_minutes: int | None
+    calories: int | None
+
+    sort_order: int
+
+    image: MenuItemImageSchema | None = None
+
+
+class MenuCategorySchema(BaseSchema):
+    id: uuid.UUID
+
+    name: str
+    description: str | None
+
+    sort_order: int
+
+    menu_items: list[MenuItemSchema] = []
+
+
+class RestaurantDetailResponseSchema(BaseSchema):
+    id: uuid.UUID
+    name: str
+    slug: str
+
+    address_line_1: str
+    address_line_2: str | None
+    city: str
+    state: str
+    postal_code: str
+
+    veg_type: VegType
+    avg_rating: Decimal
+    total_reviews: int
+
+    primary_image: RestaurantDetailPrimaryImageSchema | None
+
+    cuisines: list[RestaurantDetailCuisineSchema]
+    menu_categories: list[MenuCategorySchema]

@@ -4,6 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cache_get, cache_set
+from app.core.cache_keys import CACHE_TTL_REVIEWS, restaurant_reviews_key
 from app.core.dependencies import require_roles
 from app.db.database import get_db
 from app.modules.reviews.schemas import (
@@ -90,8 +92,15 @@ async def get_restaurant_reviews_public(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ):
-    """
-    Public Route -Get public reviews for a restaurant
-    """
+    cache_key = restaurant_reviews_key(restaurant_id, skip, limit)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     reviews, total = await get_restaurant_reviews(restaurant_id, db, skip, limit)
-    return ReviewListResponseSchema(total=total, reviews=reviews)
+    response = ReviewListResponseSchema(total=total, reviews=reviews).model_dump(
+        mode="json"
+    )
+
+    await cache_set(cache_key, response, CACHE_TTL_REVIEWS)
+    return response

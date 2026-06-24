@@ -60,6 +60,7 @@ from app.modules.restaurants.models import (
     RestaurantImageType,
     RestaurantStatus,
 )
+from app.modules.restaurants.services import invalidate_restaurant_caches
 from app.modules.users.models import User, UserRole
 
 router = APIRouter(
@@ -379,6 +380,20 @@ async def upload_image_for_menu_item(
     storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
 
+    result = await db.execute(
+        select(Restaurant).where(
+            Restaurant.id == restaurant_id,
+            Restaurant.owner_id == current_user.id,
+        )
+    )
+
+    restaurant = result.scalars().first()
+    if not restaurant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found for this owner",
+        )
+
     # =========================
     # VERIFY ITEM OWNERSHIP
     # AND URL PATH CONSISTENCY
@@ -520,6 +535,7 @@ async def upload_image_for_menu_item(
             # by a background sweep later
             pass
 
+    await invalidate_restaurant_caches(restaurant)
     # =========================
     # RETURN RESPONSE
     # =========================
@@ -1203,12 +1219,14 @@ async def update_menu_item(
     data: MenuItemUpdateRequest,
 ):
     result = await db.execute(
-        select(Restaurant.id).where(
+        select(Restaurant).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-    if not result.scalars().first():
+
+    restaurant = result.scalars().first()
+    if not restaurant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Restaurant not found for this owner",
@@ -1315,6 +1333,8 @@ async def update_menu_item(
             detail="Failed to update the menu item.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
+
     return item
 
 
@@ -1336,12 +1356,14 @@ async def toggle_menu_item_availability(
     data: MenuItemAvailabilityRequest,
 ):
     result = await db.execute(
-        select(Restaurant.id).where(
+        select(Restaurant).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-    if not result.scalars().first():
+
+    restaurant = result.scalars().first()
+    if not restaurant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Restaurant not found for this owner",
@@ -1391,6 +1413,7 @@ async def toggle_menu_item_availability(
             detail="Failed to update item availability.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
     return item
 
 
@@ -1411,12 +1434,14 @@ async def archive_menu_item(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     result = await db.execute(
-        select(Restaurant.id).where(
+        select(Restaurant).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-    if not result.scalars().first():
+
+    restaurant = result.scalars().first()
+    if not restaurant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Restaurant not found for this owner",
@@ -1466,6 +1491,7 @@ async def archive_menu_item(
             detail="Failed to archive the menu item.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
     return item
 
 
@@ -1486,12 +1512,14 @@ async def unarchive_menu_item(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     result = await db.execute(
-        select(Restaurant.id).where(
+        select(Restaurant).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-    if not result.scalars().first():
+
+    restaurant = result.scalars().first()
+    if not restaurant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Restaurant not found for this owner",
@@ -1541,6 +1569,7 @@ async def unarchive_menu_item(
             detail="Failed to unarchive the menu item.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
     return item
 
 

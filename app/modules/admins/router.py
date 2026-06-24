@@ -10,6 +10,8 @@ from sqlalchemy.orm import selectinload
 
 import app.modules.users.models as models
 from app.core.auth import hash_password
+from app.core.cache import cache_delete
+from app.core.cache_keys import cuisine_list_key
 from app.core.config import settings
 from app.core.dependencies import require_roles
 from app.db.database import get_db
@@ -53,6 +55,7 @@ router = APIRouter(prefix="/admins", tags=["admins"])
 async def create_admin(
     user: UserCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
 ):
     result = await db.execute(
         select(models.User).where(
@@ -477,6 +480,8 @@ async def approve_pending_cuisine(
 
     await db.refresh(new_cuisine)
 
+    await cache_delete(cuisine_list_key())
+
     return new_cuisine
 
 
@@ -569,6 +574,8 @@ async def reject_pending_cuisine(
             detail="Failed to reject cuisine request.",
         )
 
+    await cache_delete(cuisine_list_key())
+
 
 @router.patch(
     "/cuisines/{id}/revoke",
@@ -651,3 +658,5 @@ async def revoke_approved_cuisine(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reject cuisine request.",
         )
+
+    await cache_delete(cuisine_list_key())

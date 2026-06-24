@@ -1,3 +1,11 @@
+# TTL constraints(in sec)
+CACHE_TTL_RESTAURANT_DETAIL = 60
+CACHE_TTL_REVIEWS = 300
+CACHE_TTL_CUISINE_LIST = 3600
+CACHE_TTL_DISH_SEARCH = 60
+CACHE_TTL_DISCOVERY_FEED = 30
+
+
 def restaurant_detail_key(restaurant_id) -> str:
     return f"restaurant:detail:{restaurant_id}"
 
