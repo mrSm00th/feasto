@@ -22,6 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.concurrency import run_in_threadpool
 
+from app.core.cache import cache_get, cache_set
+from app.core.cache_keys import (
+    CACHE_TTL_CUISINE_LIST,
+    CACHE_TTL_DISCOVERY_FEED,
+    CACHE_TTL_RESTAURANT_DETAIL,
+    cuisine_list_key,
+    discovery_feed_key,
+    restaurant_detail_key,
+)
 from app.core.config import settings
 from app.core.constants import (
     RESTAURANT_FOOD_IMAGE_STORAGE_PREFIX,
@@ -36,6 +45,7 @@ from app.core.image_processing import (
 )
 from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.db.database import get_db
+from app.modules.menus.models import MenuCategory, MenuItem
 from app.modules.restaurants.models import (
     AvailabilityStatus,
     CuisineRequest,
@@ -60,12 +70,12 @@ from app.modules.restaurants.schemas import (
     CuisineResponse,
     DayHoursResponse,
     DayHoursUpdate,
-    RestaurantByCityPaginatedResponse,
     RestaurantCardSchema,
     RestaurantCreate,
     RestaurantCreateResponse,
     RestaurantCuisineListResponse,
     RestaurantCuisineRequestListResponse,
+    RestaurantDetailResponseSchema,
     RestaurantDiscoveryResponseSchema,
     RestaurantDocumentsUpload,
     RestaurantDocumentsUploadResponse,
@@ -79,7 +89,10 @@ from app.modules.restaurants.schemas import (
     RestaurantPrimaryImageResponse,
     RestaurantSchema,
 )
-from app.modules.restaurants.services import discover_restaurants_service
+from app.modules.restaurants.services import (
+    discover_restaurants_service,
+    invalidate_restaurant_caches,
+)
 from app.modules.restaurants.utils import (  # generates unique slug for restaurant; generates unique slugs for cuisine name
     _get_owned_restaurant,
     generate_unique_slug,
@@ -385,7 +398,7 @@ async def upload_primary_image_for_restaurant(
     storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
     result = await db.execute(
-        select(Restaurant.id).where(
+        select(Restaurant).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
@@ -473,6 +486,8 @@ async def upload_primary_image_for_restaurant(
         ) from exc
 
     await db.refresh(new_primary_image)
+
+    await invalidate_restaurant_caches(restaurant)
 
     if old_key:
         try:
@@ -872,6 +887,7 @@ async def pause_restaurant(
             detail="Failed to pause restaurant.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
     return restaurant
 
 
@@ -914,6 +930,7 @@ async def resume_restaurant(
             detail="Failed to resume restaurant.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
     return restaurant
 
 
@@ -990,6 +1007,7 @@ async def create_closure(
         ) from exc
 
     await db.refresh(closure)
+    await invalidate_restaurant_caches(restaurant)
     return closure
 
 
@@ -1006,7 +1024,9 @@ async def delete_closure(
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    await _get_owned_restaurant(restaurant_id, current_user.id, db)
+    restaurant = await _get_owned_restaurant(
+        restaurant_id, current_user.id, db
+    )  # ← assign it
 
     now = datetime.now(UTC)
 
@@ -1032,6 +1052,8 @@ async def delete_closure(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to remove closure.",
         ) from exc
+
+    await invalidate_restaurant_caches(restaurant)
 
 
 @router.post(
@@ -1354,11 +1376,15 @@ async def get_all_approved_cuisines(
         int, Query(ge=1, le=100)
     ] = settings.approved_cuisine_names_per_page,
 ):
-    """
-    Returns all ACTIVE approved cuisines.
-    Used by the owner to browse and pick cuisines to add to their restaurant.
-    Supports optional fuzzy name search.
-    """
+
+    is_cacheable = search is None and skip == 0
+    cache_key = cuisine_list_key() if is_cacheable else None
+
+    if cache_key:
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            return cached
+
     base_query = select(CuisineType).where(CuisineType.status == CuisineStatus.ACTIVE)
 
     if search:
@@ -1377,13 +1403,20 @@ async def get_all_approved_cuisines(
     )
     cuisines = result.scalars().all()
 
-    return CuisineListResponse(
+    response = CuisineListResponse(
         cuisines=cuisines,
         total=total,
         skip=skip,
         limit=limit,
         has_more=skip + limit < total,
     )
+
+    if cache_key:
+        await cache_set(
+            cache_key, response.model_dump(mode="json"), CACHE_TTL_CUISINE_LIST
+        )
+
+    return response
 
 
 # =========================
@@ -1749,32 +1782,84 @@ async def activate_restaurant(
             detail="Failed to activate the restaurant.",
         ) from exc
 
+    await invalidate_restaurant_caches(restaurant)
     return restaurant
 
 
+# added caching
 @router.get(
     "/{restaurant_id}",
+    response_model=RestaurantDetailResponseSchema,
 )
-async def get_detailed_restaurant_by_id(
+async def get_restaurant_detail(
     restaurant_id: uuid.UUID,
-    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    cache_key = restaurant_detail_key(restaurant_id)
+
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     result = await db.execute(
         select(Restaurant)
-        .options(selectinload(Restaurant.primary_image))
+        .options(
+            selectinload(Restaurant.primary_image),
+            selectinload(Restaurant.restaurant_cuisines).selectinload(
+                RestaurantCuisineMapping.cuisine
+            ),
+            selectinload(Restaurant.categories)
+            .selectinload(MenuCategory.menu_items)
+            .selectinload(MenuItem.image),
+        )
         .where(
             Restaurant.id == restaurant_id,
+            Restaurant.status == RestaurantStatus.ACTIVE,
         )
     )
 
-    restaurant = result.scalars().first()
+    restaurant = result.scalar_one_or_none()
 
-    return restaurant
+    if restaurant is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Restaurant not found",
+        )
 
+    response = RestaurantDetailResponseSchema(
+        id=restaurant.id,
+        name=restaurant.name,
+        slug=restaurant.slug,
+        address_line_1=restaurant.address_line_1,
+        address_line_2=restaurant.address_line_2,
+        city=restaurant.city,
+        state=restaurant.state,
+        postal_code=restaurant.postal_code,
+        veg_type=restaurant.veg_type,
+        avg_rating=restaurant.avg_rating,
+        total_reviews=restaurant.total_reviews,
+        primary_image=restaurant.primary_image,
+        cuisines=[
+            RestaurantDetailCuisineSchema(
+                id=mapping.cuisine.id,
+                cuisine_name=mapping.cuisine.cuisine_name,
+                cuisine_slug=mapping.cuisine.cuisine_slug,
+            )
+            for mapping in restaurant.restaurant_cuisines
+            if mapping.cuisine is not None
+        ],
+        menu_categories=restaurant.categories,
+    )
 
-# restaurants/router.py — single route, replaces both
+    response_dict = response.model_dump(mode="json")
+
+    await cache_set(
+        cache_key,
+        response_dict,
+        CACHE_TTL_RESTAURANT_DETAIL,
+    )
+
+    return response_dict
 
 
 @router.get("/", response_model=RestaurantDiscoveryResponseSchema)
@@ -1787,12 +1872,16 @@ async def discover_restaurants(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=50),
 ):
-
     if lat is None and lon is None and city is None:
         raise HTTPException(
             status_code=400,
             detail="Provide either lat/lon or city to discover restaurants",
         )
+
+    cache_key = discovery_feed_key(lat, lon, city, cuisine_id, cursor, limit)
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     restaurants, next_cursor, has_more = await discover_restaurants_service(
         db,
@@ -1812,12 +1901,17 @@ async def discover_restaurants(
             cuisines=[m.cuisine.cuisine_name for m in r.restaurant_cuisines],
             avg_rating=r.avg_rating,
             total_reviews=r.total_reviews,
-            # delivery_fee_estimate=r.delivery_fee_estimate, # later add this feature
+            delivery_fee_estimate=None,
             distance_km=getattr(r, "_distance_km", None),
         )
         for r in restaurants
     ]
 
-    return RestaurantDiscoveryResponseSchema(
+    response = RestaurantDiscoveryResponseSchema(
         restaurants=cards, next_cursor=next_cursor, has_more=has_more
     )
+    response_dict = response.model_dump(mode="json")
+
+    await cache_set(cache_key, response_dict, CACHE_TTL_DISCOVERY_FEED)
+
+    return response_dict

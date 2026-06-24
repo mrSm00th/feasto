@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cache_delete_pattern
 from app.modules.orders.models import Order, OrderStatus
 from app.modules.restaurants.models import Restaurant
 from app.modules.reviews.models import Review, RevieweeType, ReviewerRole
@@ -154,6 +155,11 @@ async def submit_review(
 
     await db.commit()
     await db.refresh(review)
+
+    if reviewee_type == RevieweeType.RESTAURANT and restaurant:
+
+        await cache_delete_pattern(f"restaurant:reviews:{restaurant.id}:*")
+
     return review
 
 

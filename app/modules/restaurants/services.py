@@ -9,6 +9,11 @@ from sqlalchemy import cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.cache import cache_delete, cache_delete_pattern
+from app.core.cache_keys import (
+    discovery_feed_pattern_for_restaurant_city,
+    restaurant_detail_key,
+)
 from app.core.pagination import decode_cursor, encode_cursor
 from app.modules.restaurants.models import (
     AvailabilityStatus,
@@ -226,3 +231,12 @@ async def discover_restaurants_service(
         )
 
         return restaurants, next_cursor, has_more
+
+
+async def invalidate_restaurant_caches(restaurant) -> None:
+
+    await cache_delete(restaurant_detail_key(restaurant.id))
+    if restaurant.city:
+        await cache_delete_pattern(
+            discovery_feed_pattern_for_restaurant_city(restaurant.city)
+        )

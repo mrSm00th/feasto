@@ -84,5 +84,16 @@ class Settings(BaseSettings):
     delivery_far_rate_per_km: float = 12.0
     delivery_max_fee: float = 150.0
 
+    # redis url
+    redis_url: str = "redis://localhost:6379/1"  # for caching db=1
+
+    # cache keys
+
+    CACHE_TTL_RESTAURANT_DETAIL: int = 60
+    CACHE_TTL_REVIEWS: int = 300
+    CACHE_TTL_CUISINE_LIST: int = 3600
+    CACHE_TTL_DISH_SEARCH: int = 60
+    CACHE_TTL_DISCOVERY_FEED: int = 30
+
 
 settings = Settings()
