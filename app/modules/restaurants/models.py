@@ -285,10 +285,6 @@ class Restaurant(Base):
         cascade="all, delete-orphan",
     )
 
-    reviews: Mapped[list["Review"]] = relationship(
-        back_populates="restaurant",
-    )
-
     reviews: Mapped[list["Review"]] = relationship(back_populates="reviewee_restaurant")
 
     # payout related relationships
