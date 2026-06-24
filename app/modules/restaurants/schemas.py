@@ -29,6 +29,28 @@ class RestaurantCreate(BaseSchema):
     postal_code: Annotated[str, Field(min_length=1, max_length=20)]
     country: Annotated[str, Field(min_length=1, max_length=100)]
 
+    latitude: Annotated[Decimal | None, Field(default=None, ge=-90, le=90)]
+    longitude: Annotated[Decimal | None, Field(default=None, ge=-180, le=180)]
+
+    @model_validator(mode="after")
+    def validate_location(self) -> "RestaurantCreate":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError(
+                "latitude and longitude must both be provided or both omitted."
+            )
+        return self
+
+
+class RestaurantLocationUpdate(BaseSchema):
+    latitude: Annotated[Decimal, Field(ge=-90, le=90)]
+    longitude: Annotated[Decimal, Field(ge=-180, le=180)]
+
+
+class RestaurantLocationResponse(BaseSchema):
+    id: uuid.UUID
+    latitude: Decimal | None
+    longitude: Decimal | None
+
 
 class RestaurantCreateResponse(BaseSchema):
     id: uuid.UUID

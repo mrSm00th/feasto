@@ -82,6 +82,8 @@ from app.modules.restaurants.schemas import (
     RestaurantHoursResponse,
     RestaurantHoursUpload,
     RestaurantImageUploadResponse,
+    RestaurantLocationResponse,
+    RestaurantLocationUpdate,
     RestaurantPauseSchema,
     RestaurantPendingCuisineItem,
     RestaurantPrimaryCuisineResponse,
@@ -107,19 +109,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/restaurants", tags=["restaurants"])
 
-
-# Constants
-
-
 MAX_FILES_PER_REQUEST = settings.max_restaurant_images_per_request
-
-# NOTE: allowed mime types are now centralized in the core/image_processing.py
-# ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
-
-# RESTAURANT_IMAGES_PREFIX = "restaurant_images"
-
-
-# Create restaurant draft
 
 
 @router.post(
@@ -169,6 +159,8 @@ async def create_restaurant_draft(
         country=data.country,
         slug=slug,
         status=RestaurantStatus.DRAFT,
+        latitude=data.latitude,
+        longitude=data.longitude,
     )
 
     db.add(new_restaurant)
@@ -180,6 +172,42 @@ async def create_restaurant_draft(
 
     await db.refresh(new_restaurant)
     return new_restaurant
+
+
+@router.patch(
+    "/{restaurant_id}/location",
+    response_model=RestaurantLocationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update restaurant location coordinates",
+)
+async def update_restaurant_location(
+    restaurant_id: uuid.UUID,
+    data: RestaurantLocationUpdate,
+    current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
+
+    restaurant.latitude = data.latitude
+    restaurant.longitude = data.longitude
+
+    try:
+        await db.commit()
+        await db.refresh(restaurant)
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update restaurant location.",
+        ) from exc
+
+    await invalidate_restaurant_caches(restaurant)
+
+    return RestaurantLocationResponse(
+        id=restaurant.id,
+        latitude=restaurant.latitude,
+        longitude=restaurant.longitude,
+    )
 
 
 # Upload documents
