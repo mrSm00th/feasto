@@ -1,20 +1,9 @@
 import enum
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    Enum,
-    ForeignKey,
-    Numeric,
-    String,
-    Text,
-    Uuid,
-    desc,
-)
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -28,14 +17,14 @@ class UserRole(str, enum.Enum):
 
 
 class UserStatus(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    DEACTIVATED = "DEACTIVATED"
+    SUSPENDED = "SUSPENDED"
 
-    ACTIVE = "ACTIVE"  # fully usable account
-    DEACTIVATED = (
-        "DEACTIVATED"  # user deactivaed their account, can be reactivated by user
-    )
-    SUSPENDED = (
-        "SUSPENDED"  # admin level action, can be reactivated by admin after review
-    )
+
+class OTPPurpose(str, enum.Enum):
+    EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
+    PASSWORD_RESET = "PASSWORD_RESET"
 
 
 class User(Base):
@@ -82,7 +71,6 @@ class User(Base):
         index=True,
     )
 
-    # later add enum for account status like active, suspended, deactivated etc and handle accordingly in the app
     is_account_verified: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
@@ -146,7 +134,6 @@ class User(Base):
         foreign_keys="[PartnerApplication.reviewed_by]",
     )
 
-    # cuisines requested by the user(RESTAURANT_OWNER)- PENDING
     pending_created_cuisines: Mapped[list["CuisineRequest"]] = relationship(
         back_populates="requester",
         foreign_keys="[CuisineRequest.requested_by]",
@@ -162,7 +149,6 @@ class User(Base):
         foreign_keys="[CuisineRequestHistory.requested_by]",
     )
 
-    # cuisines approved by the user(ADMIN)
     approved_cuisines: Mapped[list["CuisineType"]] = relationship(
         back_populates="approver",
         foreign_keys="[CuisineType.approved_by]",
@@ -173,7 +159,6 @@ class User(Base):
         foreign_keys="[CuisineType.revoked_by]",
     )
 
-    # cuisines rejected by the user(ADMIN)
     rejected_cuisines: Mapped[list["CuisineRequestHistory"]] = relationship(
         back_populates="rejector",
         foreign_keys="[CuisineRequestHistory.rejected_by]",
@@ -183,7 +168,6 @@ class User(Base):
         back_populates="user",
     )
 
-    # rider application relationships
     rider_applications: Mapped[list["RiderApplication"]] = relationship(
         back_populates="applicant",
         cascade="all, delete-orphan",
@@ -220,6 +204,11 @@ class User(Base):
         foreign_keys="[Review.reviewee_user_id]",
     )
 
+    otp_verifications: Mapped[list["OTPVerification"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
@@ -250,3 +239,49 @@ class RefreshToken(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="refresh_tokens")
+
+
+class OTPVerification(Base):
+    __tablename__ = "otp_verifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # never store plaintext — stores hashed OTP or hashed reset token
+    otp_hash: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    purpose: Mapped[OTPPurpose] = mapped_column(
+        Enum(OTPPurpose),
+        nullable=False,
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    is_used: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    user: Mapped["User"] = relationship(back_populates="otp_verifications")
+
+    __table_args__ = (Index("ix_otp_user_purpose", "user_id", "purpose"),)

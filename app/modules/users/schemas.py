@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.modules.restaurants.models import CuisineRequestHistory, RestaurantStatus
+from app.modules.restaurants.models import RestaurantStatus
 from app.modules.users.models import UserRole, UserStatus
 
 
@@ -18,7 +18,6 @@ class Token(BaseModel):
 
 
 class UserCreate(BaseSchema):
-
     full_name: Annotated[str, Field(min_length=3, max_length=100)]
     email: EmailStr
     phone_number: Annotated[str, Field(min_length=7, max_length=15)]
@@ -26,7 +25,6 @@ class UserCreate(BaseSchema):
 
 
 class UserPublic(BaseSchema):
-
     full_name: str
     role: UserRole
     user_status: UserStatus
@@ -34,13 +32,11 @@ class UserPublic(BaseSchema):
 
 
 class UserPrivate(UserPublic):
-
     email: EmailStr
     phone_number: str
 
 
 class RestaurantList(BaseSchema):
-
     id: uuid.UUID
     name: str
     address_line_1: str
@@ -50,7 +46,6 @@ class RestaurantList(BaseSchema):
 
 
 class PaginatedOwnerRestaurant(BaseSchema):
-
     restaurants: list[RestaurantList]
     total: int
     skip: int
@@ -59,6 +54,39 @@ class PaginatedOwnerRestaurant(BaseSchema):
 
 
 class CuisineRequestHistroryResponse(BaseSchema):
-
     id: uuid.UUID
     cuisine_name: str
+
+
+# =========================
+# AUTH FLOW SCHEMAS
+# =========================
+
+
+class MessageResponse(BaseSchema):
+    message: str
+
+
+# email verification
+
+
+class SendOTPRequest(BaseSchema):
+    email: EmailStr
+
+
+class VerifyEmailRequest(BaseSchema):
+    email: EmailStr
+    otp: Annotated[str, Field(min_length=6, max_length=6)]
+
+
+# password reset
+
+
+class PasswordResetRequest(BaseSchema):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseSchema):
+    email: EmailStr
+    token: str
+    new_password: Annotated[str, Field(min_length=8, max_length=128)]
