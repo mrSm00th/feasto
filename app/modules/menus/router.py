@@ -234,26 +234,20 @@ async def create_menu_item(
     db: Annotated[AsyncSession, Depends(get_db)],
     data: MenuItemCreate,
 ):
-
     result = await db.execute(
         select(Restaurant).where(
             Restaurant.id == restaurant_id,
             Restaurant.owner_id == current_user.id,
         )
     )
-
     restaurant = result.scalars().first()
 
     if not restaurant:
-
         raise HTTPException(
-            staus_code=status.HTTP_404_NOT_FOUND, detail="Restaurant not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Restaurant not found",
         )
 
-    # =========================
-    # VERIFY CATEGORY BELONGS TO
-    # THE OWNER AND RESTAURANT
-    # =========================
     result = await db.execute(
         select(MenuCategory)
         .join(Restaurant)
@@ -263,7 +257,6 @@ async def create_menu_item(
             Restaurant.owner_id == current_user.id,
         )
     )
-
     category = result.scalar_one_or_none()
 
     if not category:
@@ -274,34 +267,24 @@ async def create_menu_item(
 
     normalized_name = normalize(data.name)
 
-    # =========================
-    # CHECK DUPLICATE ITEM
-    # WITHIN CATEGORY
-    # =========================
     result = await db.execute(
         select(MenuItem).where(
             MenuItem.category_id == category_id,
             MenuItem.normalized_name == normalized_name,
         )
     )
-
     existing_menu_item = result.scalars().first()
 
     if existing_menu_item:
-
         if existing_menu_item.status == MenuItemStatus.ARCHIVED:
-
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Archived menu item with same name and category found for this restaurant with ID: {existing_menu_item.id} ",
+                detail=f"Archived menu item with same name exists in this category, ID: {existing_menu_item.id}",
             )
-
-        else:
-
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Menu category already exists",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A menu item with this name already exists in this category",
+        )
 
     result = await db.execute(
         select(func.max(MenuItem.sort_order)).where(
@@ -309,9 +292,7 @@ async def create_menu_item(
             MenuItem.category_id == category_id,
         )
     )
-
     max_sort_order = result.scalars().first()
-
     sort_order = (max_sort_order or 0) + 1
 
     new_item = MenuItem(
@@ -328,29 +309,24 @@ async def create_menu_item(
         preparation_time_minutes=data.preparation_time_minutes,
         calories=data.calories,
     )
-
     db.add(new_item)
 
-    if restaurant.status != RestaurantStatus.MENU_ADDED:
-
+    # only advance status if still in onboarding — never downgrade an active restaurant
+    if restaurant.status not in (
+        RestaurantStatus.ACTIVE,
+        RestaurantStatus.MENU_ADDED,
+    ):
         restaurant.status = RestaurantStatus.MENU_ADDED
 
     try:
         await db.commit()
-
     except IntegrityError as exc:
         await db.rollback()
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create menu item.",
         ) from exc
 
-    # =========================
-    # RE-FETCH WITH IMAGE
-    # relationship eager-loaded
-    # so Pydantic can serialize it
-    # =========================
     result = await db.execute(
         select(MenuItem)
         .options(selectinload(MenuItem.image))
