@@ -47,7 +47,6 @@ from app.core.storage import StorageBackend, _cleanup_keys, get_public_storage
 from app.db.database import get_db
 from app.modules.menus.models import MenuCategory, MenuItem
 from app.modules.restaurants.models import (
-    AvailabilityStatus,
     CuisineRequest,
     CuisineStatus,
     CuisineType,
@@ -70,6 +69,9 @@ from app.modules.restaurants.schemas import (
     CuisineResponse,
     DayHoursResponse,
     DayHoursUpdate,
+    MenuCategorySchema,
+    MenuItemImageSchema,
+    MenuItemSchema,
     RestaurantActivateResponse,
     RestaurantCardSchema,
     RestaurantCreate,
@@ -77,6 +79,7 @@ from app.modules.restaurants.schemas import (
     RestaurantCuisineListResponse,
     RestaurantCuisineRequestListResponse,
     RestaurantDetailCuisineSchema,
+    RestaurantDetailPrimaryImageSchema,
     RestaurantDetailResponseSchema,
     RestaurantDiscoveryResponseSchema,
     RestaurantDocumentsUpload,
@@ -758,7 +761,6 @@ async def create_restaurant_hours(
 ):
     restaurant = await _get_owned_restaurant(restaurant_id, current_user.id, db)
 
-    # delete all existing shifts for this restaurant — full replacement
     await db.execute(
         delete(RestaurantAvailability).where(
             RestaurantAvailability.restaurant_id == restaurant_id
@@ -770,22 +772,18 @@ async def create_restaurant_hours(
             restaurant_id=restaurant_id,
             day_of_week=shift.day_of_week,
             status=shift.status,
-            opening_time=(
-                ist_time_to_utc(shift.opening_time) if shift.opening_time else None
-            ),
-            closing_time=(
-                ist_time_to_utc(shift.closing_time) if shift.closing_time else None
-            ),
+            opening_time=shift.opening_time,
+            closing_time=shift.closing_time,
             shift_index=shift.shift_index,
         )
         for shift in data.hours
     ]
 
     db.add_all(new_rows)
-    status = [RestaurantStatus.ACTIVE, RestaurantStatus.MENU_ADDED]
-    if restaurant.status in status:
-        pass
-    else:
+
+    # fix: don't shadow the `status` import with a local variable
+    onboarding_statuses = (RestaurantStatus.ACTIVE, RestaurantStatus.MENU_ADDED)
+    if restaurant.status not in onboarding_statuses:
         restaurant.status = RestaurantStatus.TIMINGS_ADDED
 
     try:
@@ -846,7 +844,6 @@ async def update_day_hours(
         )
 
     try:
-
         await db.execute(
             delete(RestaurantAvailability).where(
                 RestaurantAvailability.restaurant_id == restaurant_id,
@@ -859,12 +856,8 @@ async def update_day_hours(
                 restaurant_id=restaurant_id,
                 day_of_week=shift.day_of_week,
                 status=shift.status,
-                opening_time=(
-                    ist_time_to_utc(shift.opening_time) if shift.opening_time else None
-                ),
-                closing_time=(
-                    ist_time_to_utc(shift.closing_time) if shift.closing_time else None
-                ),
+                opening_time=shift.opening_time,
+                closing_time=shift.closing_time,
                 shift_index=shift.shift_index,
             )
             for shift in data.shifts
@@ -896,7 +889,7 @@ async def update_day_hours(
 # Temporarily close the restaurant
 
 
-# ── MANUAL PAUSE ──────────────────────────────────────────
+# MANUAL PAUSE
 
 
 @router.patch(
@@ -1852,9 +1845,9 @@ async def activate_restaurant(
 async def get_restaurant_detail(
     restaurant_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
 ):
     cache_key = restaurant_detail_key(restaurant_id)
-
     cached = await cache_get(cache_key)
     if cached is not None:
         return cached
@@ -1875,13 +1868,54 @@ async def get_restaurant_detail(
             Restaurant.status == RestaurantStatus.ACTIVE,
         )
     )
-
     restaurant = result.scalar_one_or_none()
 
     if restaurant is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Restaurant not found",
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    # resolve primary image URL
+    primary_image = None
+    if restaurant.primary_image:
+        primary_image = RestaurantDetailPrimaryImageSchema(
+            id=restaurant.primary_image.id,
+            image_url=storage.public_url(restaurant.primary_image.image_url),
+        )
+
+    # resolve menu item image URLs
+    menu_categories = []
+    for category in restaurant.categories:
+        items = []
+        for item in category.menu_items:
+            image = None
+            if item.image:
+                image = MenuItemImageSchema(
+                    id=item.image.id,
+                    image_url=storage.public_url(item.image.image_url),
+                    alt_text=getattr(item.image, "alt_text", None),
+                )
+            items.append(
+                MenuItemSchema(
+                    id=item.id,
+                    name=item.name,
+                    description=item.description,
+                    price=item.price,
+                    discounted_price=item.discounted_price,
+                    veg_type=item.veg_type,
+                    is_available=item.is_available,
+                    preparation_time_minutes=item.preparation_time_minutes,
+                    calories=item.calories,
+                    sort_order=item.sort_order,
+                    image=image,
+                )
+            )
+        menu_categories.append(
+            MenuCategorySchema(
+                id=category.id,
+                name=category.name,
+                description=category.description,
+                sort_order=category.sort_order,
+                menu_items=items,
+            )
         )
 
     response = RestaurantDetailResponseSchema(
@@ -1896,7 +1930,7 @@ async def get_restaurant_detail(
         veg_type=restaurant.veg_type,
         avg_rating=restaurant.avg_rating,
         total_reviews=restaurant.total_reviews,
-        primary_image=restaurant.primary_image,
+        primary_image=primary_image,
         cuisines=[
             RestaurantDetailCuisineSchema(
                 id=mapping.cuisine.id,
@@ -1906,17 +1940,11 @@ async def get_restaurant_detail(
             for mapping in restaurant.restaurant_cuisines
             if mapping.cuisine is not None
         ],
-        menu_categories=restaurant.categories,
+        menu_categories=menu_categories,
     )
 
     response_dict = response.model_dump(mode="json")
-
-    await cache_set(
-        cache_key,
-        response_dict,
-        CACHE_TTL_RESTAURANT_DETAIL,
-    )
-
+    await cache_set(cache_key, response_dict, CACHE_TTL_RESTAURANT_DETAIL)
     return response_dict
 
 
@@ -2063,6 +2091,7 @@ async def get_restaurant_detail(
 @router.get("/", response_model=RestaurantDiscoveryResponseSchema)
 async def discover_restaurants(
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
     lat: float | None = Query(default=None),
     lon: float | None = Query(default=None),
     city: str | None = Query(default=None, min_length=2, max_length=50),
@@ -2095,7 +2124,12 @@ async def discover_restaurants(
         RestaurantCardSchema(
             id=r.id,
             name=r.name,
-            cover_image=r.primary_image.image_url if r.primary_image else None,
+            # resolve cover image URL
+            cover_image=(
+                storage.public_url(r.primary_image.image_url)
+                if r.primary_image
+                else None
+            ),
             cuisines=[m.cuisine.cuisine_name for m in r.restaurant_cuisines],
             avg_rating=r.avg_rating,
             total_reviews=r.total_reviews,
@@ -2109,7 +2143,5 @@ async def discover_restaurants(
         restaurants=cards, next_cursor=next_cursor, has_more=has_more
     )
     response_dict = response.model_dump(mode="json")
-
     await cache_set(cache_key, response_dict, CACHE_TTL_DISCOVERY_FEED)
-
     return response_dict

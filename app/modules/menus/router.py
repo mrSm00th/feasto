@@ -764,18 +764,19 @@ async def reorder_menu_categories(
 @router.get(
     "/{restaurant_id}/menu-categories/{category_id}/items/manage",
     response_model=MenuItemPaginatedResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def get_all_menu_items_for_category_paginated_owner_view(
     restaurant_id: uuid.UUID,
     category_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[
         int, Query(ge=1, le=100)
     ] = settings.menuItems_per_catagory_per_page,
 ):
-    # Verifying the category exists and belongs to this owner's restaurant
     category = await db.scalar(
         select(MenuCategory).where(
             MenuCategory.id == category_id,
@@ -789,7 +790,6 @@ async def get_all_menu_items_for_category_paginated_owner_view(
             detail="Category not found for this restaurant.",
         )
 
-    # verify restaurant ownership
     restaurant = await db.scalar(
         select(Restaurant).where(
             Restaurant.id == restaurant_id,
@@ -802,12 +802,6 @@ async def get_all_menu_items_for_category_paginated_owner_view(
             detail="You do not own this restaurant.",
         )
 
-    # =========================
-    # FETCH ITEMS + TOTAL COUNT
-    # via window function; eager-
-    # load image on each item so
-    # Pydantic can serialize it
-    # =========================
     count_col = func.count().over().label("total")
 
     result = await db.execute(
@@ -822,14 +816,35 @@ async def get_all_menu_items_for_category_paginated_owner_view(
         .offset(skip)
         .limit(limit)
     )
-
     rows = result.all()
 
     total = rows[0][1] if rows else 0
     menu_items = [row[0] for row in rows]
 
+    resolved_items = []
+    for item in menu_items:
+        resolved_items.append(
+            MenuItemSchema(
+                id=item.id,
+                name=item.name,
+                description=item.description,
+                price=item.price,
+                veg_type=item.veg_type,
+                is_available=item.is_available,
+                sort_order=item.sort_order,
+                image=(
+                    MenuItemImageSchema(
+                        id=item.image.id,
+                        image_url=storage.public_url(item.image.image_url),
+                    )
+                    if item.image
+                    else None
+                ),
+            )
+        )
+
     return MenuItemPaginatedResponse(
-        menu_items=menu_items,
+        items=resolved_items,
         category_id=category_id,
         restaurant_id=restaurant_id,
         total=total,
@@ -1671,10 +1686,10 @@ async def get_all_menu_items_for_category(
     restaurant_id: uuid.UUID,
     category_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: Annotated[StorageBackend, Depends(get_public_storage)],
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = settings.menu_items_per_page,
 ):
-
     category_exists = await db.scalar(
         select(MenuCategory.id).where(
             MenuCategory.id == category_id,
@@ -1682,7 +1697,6 @@ async def get_all_menu_items_for_category(
             MenuCategory.status == MenuCategoryStatus.ACTIVE,
         )
     )
-
     if not category_exists:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1705,11 +1719,33 @@ async def get_all_menu_items_for_category(
         .offset(skip)
         .limit(limit)
     )
-
     items = result.scalars().all()
 
+    # resolve image URLs before returning
+    resolved_items = []
+    for item in items:
+        resolved_items.append(
+            MenuItemSchema(
+                id=item.id,
+                name=item.name,
+                description=item.description,
+                price=item.price,
+                veg_type=item.veg_type,
+                is_available=item.is_available,
+                sort_order=item.sort_order,
+                image=(
+                    MenuItemImageSchema(
+                        id=item.image.id,
+                        image_url=storage.public_url(item.image.image_url),
+                    )
+                    if item.image
+                    else None
+                ),
+            )
+        )
+
     return MenuItemPaginatedResponse(
-        items=items,
+        items=resolved_items,
         category_id=category_id,
         restaurant_id=restaurant_id,
         total=total or 0,
