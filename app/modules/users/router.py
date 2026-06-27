@@ -100,6 +100,7 @@ async def create_user(
     user: UserCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+
     result = await db.execute(
         select(models.User).where(
             func.lower(models.User.full_name) == user.full_name.lower()
@@ -112,7 +113,9 @@ async def create_user(
         )
 
     result = await db.execute(
-        select(models.User).where(models.User.email == user.email)
+        select(models.User).where(
+            func.lower(models.User.email) == user.email  # already lowercased
+        )
     )
     if result.scalars().first():
         raise HTTPException(
@@ -131,7 +134,7 @@ async def create_user(
 
     new_user = models.User(
         full_name=user.full_name,
-        email=user.email,
+        email=user.email,  # already normalized by schema
         phone_number=user.phone_number,
         password_hash=hash_password(user.password),
     )
