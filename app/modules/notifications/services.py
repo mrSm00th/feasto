@@ -61,8 +61,8 @@ async def push_new_order_to_restaurant(order: Order, db: AsyncSession):
 
     # Layer 2 — real-time push (if owner's dashboard is open)
     # creating the json response(dict type layered response)
-    await manager.send_to_restaurant(
-        restaurant_id=order.restaurant_id,
+    await manager.send_to(
+        key=order.restaurant_id,
         message={
             "type": "new_order",
             "order_id": str(order.id),
