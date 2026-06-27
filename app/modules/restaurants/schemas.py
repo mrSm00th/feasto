@@ -419,7 +419,7 @@ class RestaurantDetailCuisineSchema(BaseSchema):
 
 class RestaurantDetailPrimaryImageSchema(BaseSchema):
     id: uuid.UUID
-    image_path: str
+    image_url: str
 
 
 class MenuItemImageSchema(BaseSchema):
@@ -479,3 +479,46 @@ class RestaurantDetailResponseSchema(BaseSchema):
 
     cuisines: list[RestaurantDetailCuisineSchema]
     menu_categories: list[MenuCategorySchema]
+
+
+# =========================
+# RESTAURANT DOCUMENTS RESPONSE
+# =========================
+
+
+class RestaurantDocumentsUploadResponse(BaseSchema):
+    id: uuid.UUID
+    status: RestaurantStatus
+    fssai_license_number: str | None
+    gst_number: str | None
+    updated_at: datetime
+
+
+# =========================
+# RESTAURANT ACTIVATE RESPONSE
+# =========================
+
+
+class RestaurantActivateResponse(BaseSchema):
+    id: uuid.UUID
+    name: str
+    slug: str
+    status: RestaurantStatus
+    is_activated: bool
+    activated_at: datetime | None
+
+
+# =========================
+# RESTAURANT PAUSE / RESUME RESPONSE
+# =========================
+
+
+class RestaurantSchema(BaseSchema):
+    id: uuid.UUID
+    name: str
+    slug: str
+    status: RestaurantStatus
+    veg_type: VegType
+    is_manually_paused: bool
+    pause_reason: str | None
+    paused_at: datetime | None

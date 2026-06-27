@@ -70,11 +70,13 @@ from app.modules.restaurants.schemas import (
     CuisineResponse,
     DayHoursResponse,
     DayHoursUpdate,
+    RestaurantActivateResponse,
     RestaurantCardSchema,
     RestaurantCreate,
     RestaurantCreateResponse,
     RestaurantCuisineListResponse,
     RestaurantCuisineRequestListResponse,
+    RestaurantDetailCuisineSchema,
     RestaurantDetailResponseSchema,
     RestaurantDiscoveryResponseSchema,
     RestaurantDocumentsUpload,
@@ -105,9 +107,17 @@ from app.modules.restaurants.utils import (  # generates unique slug for restaur
 )
 from app.modules.users.models import User, UserRole
 
+# ==============================
+# import time
+# from time import perf_counter
+# import json
+# import redis
+# ================================
+
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/restaurants", tags=["restaurants"])
+router = APIRouter(prefix="/restaurants", tags=["restaurants"])
 
 MAX_FILES_PER_REQUEST = settings.max_restaurant_images_per_request
 
@@ -235,20 +245,30 @@ async def upload_restaurant_documents(
             status.HTTP_404_NOT_FOUND, detail="Restaurant not found for this owner."
         )
 
+    # only allow documents upload if restaurant is in DRAFT status
+    if restaurant.status not in (
+        RestaurantStatus.DRAFT,
+        RestaurantStatus.DOCUMENTS_ADDED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Documents can only be uploaded during onboarding.",
+        )
+
     restaurant.fssai_license_number = data.fssai_license_number
     restaurant.gst_number = data.gst_number
     restaurant.status = RestaurantStatus.DOCUMENTS_ADDED
 
-    db.add(restaurant)
     try:
         await db.commit()
+        await db.refresh(restaurant)
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Error updating restaurant documents."
+            status.HTTP_400_BAD_REQUEST,
+            detail="Error updating restaurant documents.",
         ) from exc
 
-    await db.refresh(restaurant)
     return restaurant
 
 
@@ -762,7 +782,11 @@ async def create_restaurant_hours(
     ]
 
     db.add_all(new_rows)
-    restaurant.status = RestaurantStatus.TIMINGS_ADDED
+    status = [RestaurantStatus.ACTIVE, RestaurantStatus.MENU_ADDED]
+    if restaurant.status in status:
+        pass
+    else:
+        restaurant.status = RestaurantStatus.TIMINGS_ADDED
 
     try:
         await db.commit()
@@ -1767,33 +1791,39 @@ async def demote_primary_cuisine(
 
 @router.post(
     "/{restaurant_id}/activate",
+    response_model=RestaurantActivateResponse,
+    status_code=status.HTTP_200_OK,
 )
 async def activate_restaurant(
     restaurant_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.RESTAURANT_OWNER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-
     result = await db.execute(
         select(Restaurant).where(
             Restaurant.owner_id == current_user.id,
             Restaurant.id == restaurant_id,
         )
     )
-
     restaurant = result.scalars().first()
 
     if not restaurant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="restaurant not found for this owner",
+            detail="Restaurant not found for this owner.",
         )
 
-    if restaurant.status != RestaurantStatus.MENU_ADDED:
-
+    allowed_statuses = [RestaurantStatus.MENU_ADDED]
+    if restaurant.status not in allowed_statuses:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Added atleast a menu item to activate the restaurant",
+            detail="Add at least a menu item to activate the restaurant.",
+        )
+
+    if restaurant.status == RestaurantStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Restaurant is already active.",
         )
 
     restaurant.status = RestaurantStatus.ACTIVE
@@ -1888,6 +1918,146 @@ async def get_restaurant_detail(
     )
 
     return response_dict
+
+
+# =================================================
+# @router.get(
+#     "/{restaurant_id}",
+#     response_model=RestaurantDetailResponseSchema,
+# )
+# async def get_restaurant_detail(
+#     restaurant_id: uuid.UUID,
+#     db: Annotated[AsyncSession, Depends(get_db)],
+# ):
+#     request_start = perf_counter()
+
+#     cache_key = restaurant_detail_key(restaurant_id)
+
+#     cache_start = perf_counter()
+#     cached = await cache_get(cache_key)
+#     # ======================
+#     print("CACHE GET RESULT:", cached is not None)
+#     # =====================
+#     cache_lookup_time = (perf_counter() - cache_start) * 1000
+
+#     if cached is not None:
+#         total_time = (perf_counter() - request_start) * 1000
+
+#         print(
+#             f"[CACHE HIT] "
+#             f"cache_lookup={cache_lookup_time:.2f}ms "
+#             f"total={total_time:.2f}ms"
+#         )
+
+#         return cached
+
+#     db_start = perf_counter()
+
+#     result = await db.execute(
+#         select(Restaurant)
+#         .options(
+#             selectinload(Restaurant.primary_image),
+#             selectinload(Restaurant.restaurant_cuisines).selectinload(
+#                 RestaurantCuisineMapping.cuisine
+#             ),
+#             selectinload(Restaurant.categories)
+#             .selectinload(MenuCategory.menu_items)
+#             .selectinload(MenuItem.image),
+#         )
+#         .where(
+#             Restaurant.id == restaurant_id,
+#             Restaurant.status == RestaurantStatus.ACTIVE,
+#         )
+#     )
+
+#     restaurant = result.scalar_one_or_none()
+
+#     db_time = (perf_counter() - db_start) * 1000
+
+#     if restaurant is None:
+#         raise HTTPException(
+#             status_code=404,
+#             detail="Restaurant not found",
+#         )
+
+#     serialization_start = perf_counter()
+
+#     response = RestaurantDetailResponseSchema(
+#         id=restaurant.id,
+#         name=restaurant.name,
+#         slug=restaurant.slug,
+#         address_line_1=restaurant.address_line_1,
+#         address_line_2=restaurant.address_line_2,
+#         city=restaurant.city,
+#         state=restaurant.state,
+#         postal_code=restaurant.postal_code,
+#         veg_type=restaurant.veg_type,
+#         avg_rating=restaurant.avg_rating,
+#         total_reviews=restaurant.total_reviews,
+#         primary_image=restaurant.primary_image,
+#         cuisines=[
+#             RestaurantDetailCuisineSchema(
+#                 id=mapping.cuisine.id,
+#                 cuisine_name=mapping.cuisine.cuisine_name,
+#                 cuisine_slug=mapping.cuisine.cuisine_slug,
+#             )
+#             for mapping in restaurant.restaurant_cuisines
+#             if mapping.cuisine is not None
+#         ],
+#         menu_categories=restaurant.categories,
+#     )
+
+#     response_dict = response.model_dump(mode="json")
+
+#     serialization_time = (
+#         perf_counter() - serialization_start
+#     ) * 1000
+
+#     redis_write_start = perf_counter()
+
+
+#     payload = response.model_dump(mode="json")
+
+#     print(
+#         "payload_size_kb:",
+#         len(json.dumps(payload).encode()) / 1024
+#     )
+#     start = perf_counter()
+
+#     await redis.set(
+#         "test_key",
+#         "hello"
+#     )
+
+#     print(
+#         f"redis_raw_set={(time.perf_counter()-start)*1000:.2f}ms"
+#     )
+
+#     await cache_set(
+#         cache_key,
+#         response_dict,
+#         CACHE_TTL_RESTAURANT_DETAIL,
+#     )
+
+#     # =====================
+#     print("CACHE SET CALLED:", cache_key)
+#     # ==========================
+
+#     redis_write_time = (
+#         perf_counter() - redis_write_start
+#     ) * 1000
+
+#     total_time = (perf_counter() - request_start) * 1000
+
+#     print(
+#         f"[CACHE MISS] "
+#         f"db={db_time:.2f}ms "
+#         f"serialization={serialization_time:.2f}ms "
+#         f"redis_write={redis_write_time:.2f}ms "
+#         f"total={total_time:.2f}ms"
+#     )
+
+#     return response_dict
 
 
 @router.get("/", response_model=RestaurantDiscoveryResponseSchema)
