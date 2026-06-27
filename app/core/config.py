@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    # database_url_direct: str
 
     secret_key: SecretStr
     algorithm: str = "HS256"
@@ -24,6 +25,14 @@ class Settings(BaseSettings):
     application_per_page: int = 10
 
     storage_backend: str = "local"
+
+    # s3 / supabase storage
+    s3_public_bucket_name: str = "kartflow-public"
+    s3_private_bucket_name: str = "kartflow-private"
+    s3_region: str = "ap-south-1"
+    s3_endpoint_url: str | None = None
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
 
     max_upload_size_bytes: int = Field(
         default=5 * 1024 * 1024,

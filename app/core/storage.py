@@ -100,17 +100,13 @@ class LocalStorage(StorageBackend):
 
 
 class S3Storage(StorageBackend):
-    """
-    Stores files in an S3 bucket.
-    """
 
     def __init__(self, bucket: str) -> None:
         self._bucket = bucket
         self._region: str = settings.s3_region
         self._endpoint: str | None = settings.s3_endpoint_url
-
-    def _client(self):
-        return boto3.client(
+        # build once, reuse — not per-call
+        self._client = boto3.client(
             "s3",
             region_name=self._region,
             aws_access_key_id=(
@@ -127,7 +123,7 @@ class S3Storage(StorageBackend):
         )
 
     def _upload_sync(self, file_bytes: bytes, key: str, content_type: str) -> None:
-        self._client().upload_fileobj(
+        self._client.upload_fileobj(
             BytesIO(file_bytes),
             self._bucket,
             key,
@@ -139,12 +135,12 @@ class S3Storage(StorageBackend):
 
     def _delete_sync(self, key: str) -> None:
         try:
-            self._client().delete_object(Bucket=self._bucket, Key=key)
+            self._client.delete_object(Bucket=self._bucket, Key=key)
         except (BotoCoreError, ClientError):
             logger.warning("S3Storage: could not delete key %r", key, exc_info=True)
 
     def _generate_signed_url_sync(self, key: str, expires_in: int) -> str:
-        return self._client().generate_presigned_url(
+        return self._client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": key},
             ExpiresIn=expires_in,
@@ -154,15 +150,17 @@ class S3Storage(StorageBackend):
         self, file_bytes: bytes, key: str, content_type: str = "image/jpeg"
     ) -> None:
         await run_in_threadpool(self._upload_sync, file_bytes, key, content_type)
-        logger.debug("S3Storage: uploaded s3://%s/%s", self._bucket, key)
 
     async def delete(self, key: str) -> None:
         await run_in_threadpool(self._delete_sync, key)
-        logger.debug("S3Storage: deleted s3://%s/%s", self._bucket, key)
 
     def public_url(self, key: str) -> str:
         if self._endpoint:
-            return f"{self._endpoint.rstrip('/')}/{self._bucket}/{key}"
+            # Supabase public URL format
+            # https://<project-ref>.supabase.co/storage/v1/object/public/<bucket>/<key>
+            base = self._endpoint.replace("/storage/v1/s3", "")
+            return f"{base}/storage/v1/object/public/{self._bucket}/{key}"
+        # standard S3
         return f"https://{self._bucket}.s3.{self._region}.amazonaws.com/{key}"
 
     async def generate_signed_url(self, key: str, expires_in: int = 300) -> str:
