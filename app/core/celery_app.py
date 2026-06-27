@@ -1,7 +1,15 @@
+import asyncio
+
 from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import settings
+from app.db.models_registry import load_models
+
+if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+load_models()
 
 celery_app = Celery(
     "Kartflow",
@@ -29,4 +37,10 @@ celery_app.conf.beat_schedule = {
 }
 
 # Auto-discover tasks in modules by looking for tasks.py in each listed module
-celery_app.autodiscover_tasks(["app.modules.orders"])
+celery_app.autodiscover_tasks(
+    [
+        "app.modules.orders",
+        "app.modules.riders",
+        "app.modules.restaurants",
+    ]
+)
