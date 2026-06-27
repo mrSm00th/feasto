@@ -1,11 +1,13 @@
+import asyncio
 import logging
-from email.message import EmailMessage
 
-import aiosmtplib
+import resend
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+resend.api_key = settings.resend_api_key
 
 
 async def send_email(
@@ -14,26 +16,18 @@ async def send_email(
     plain_text: str,
     html_content: str | None = None,
 ) -> None:
-    message = EmailMessage()
-    message["From"] = f"{settings.mail_from_name} <{settings.mail_from}>"
-    message["To"] = to_email
-    message["Subject"] = subject
-
-    message.set_content(plain_text)
-
+    params = {
+        "from": f"{settings.mail_from_name} <{settings.mail_from}>",
+        "to": [to_email],
+        "subject": subject,
+        "text": plain_text,
+    }
     if html_content:
-        message.add_alternative(html_content, subtype="html")
+        params["html"] = html_content
 
     try:
-        await aiosmtplib.send(
-            message,
-            hostname=settings.mail_server,
-            port=settings.mail_port,
-            username=settings.mail_username or None,
-            password=settings.mail_password.get_secret_value() or None,
-            start_tls=settings.mail_use_tls,
-            timeout=10,
-        )
+        # resend SDK is sync — run in thread to avoid blocking event loop
+        await asyncio.to_thread(resend.Emails.send, params)
     except Exception as exc:
         logger.exception("Failed to send email to %s: %s", to_email, exc)
         raise
@@ -94,8 +88,6 @@ async def send_password_reset_email(
     full_name: str,
     reset_token: str,
 ) -> None:
-    # email is embedded in the URL so the frontend can pre-fill it
-    # and pass both token + email to the confirm endpoint
     reset_url = (
         f"{settings.frontend_url}/reset-password"
         f"?token={reset_token}&email={to_email}"
@@ -109,7 +101,7 @@ Click the link below to set a new password:
 {reset_url}
 
 This link expires in {settings.otp_expire_minutes} minutes.
-If you did not request this, ignore this email — your password will not change.
+If you did not request this, ignore this email.
 
 - KartFlow Team
 """

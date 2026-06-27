@@ -70,13 +70,9 @@ class Settings(BaseSettings):
     CACHE_TTL_DISCOVERY_FEED: int = 30
 
     # email
-    mail_server: str = "smtp.gmail.com"
-    mail_port: int = 587
-    mail_username: str = ""
-    mail_password: SecretStr = SecretStr("")
-    mail_from: str = ""
+    resend_api_key: str = ""
+    mail_from: str = "onboarding@resend.dev"
     mail_from_name: str = "KartFlow"
-    mail_use_tls: bool = True
 
     # used in password reset email link
     frontend_url: str = "http://localhost:3000"
