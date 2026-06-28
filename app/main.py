@@ -1,11 +1,14 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi import Depends, FastAPI, Request
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.redis_client import ping_redis
-from app.db.database import engine
+from app.db.database import engine, get_db
 from app.db.models_registry import load_models
 from app.modules.addresses import router as addresses
 from app.modules.admins import router as admins
@@ -43,10 +46,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-
-app.mount("/media", StaticFiles(directory="media"), name="media")
-
 load_models()
+
+templates = Jinja2Templates(directory="app/templates")
 
 
 app.include_router(users.router, prefix="/api")
@@ -78,3 +80,21 @@ app.include_router(my_reviews_router, prefix="/api")
 app.include_router(public_router, prefix="/api")
 
 app.include_router(payout_router.router, prefix="/api")
+
+
+@app.get(
+    "/",
+    name="home",
+)
+async def home(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {
+            "title": "Home",
+        },
+    )
