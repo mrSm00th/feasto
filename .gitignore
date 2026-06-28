@@ -49,3 +49,7 @@ media
 snipits
 
 kartflow_backup.sql
+
+scripts/__pycache__/
+
+scripts

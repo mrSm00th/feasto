@@ -781,7 +781,6 @@ async def create_restaurant_hours(
 
     db.add_all(new_rows)
 
-    # fix: don't shadow the `status` import with a local variable
     onboarding_statuses = (RestaurantStatus.ACTIVE, RestaurantStatus.MENU_ADDED)
     if restaurant.status not in onboarding_statuses:
         restaurant.status = RestaurantStatus.TIMINGS_ADDED
