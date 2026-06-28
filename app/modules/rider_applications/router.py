@@ -41,6 +41,24 @@ admin_router = APIRouter(
     prefix="/admin/rider-applications", tags=["admin-rider-applications"]
 )
 
+# helper
+
+
+async def resolve_application_urls(
+    application: RiderApplication,
+) -> RiderApplicationResponseSchema:
+    storage = get_private_storage()
+    data = RiderApplicationResponseSchema.model_validate(application).model_dump()
+
+    for field in ("identity_proof_image", "profile_image", "license_image"):
+        raw_key = getattr(application, field)
+        data[field] = await storage.generate_signed_url(raw_key) if raw_key else None
+
+    return RiderApplicationResponseSchema(**data)
+
+
+#  rider-facing routes
+
 
 @router.post(
     "",
@@ -52,7 +70,9 @@ async def create_rider_application(
     current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    return await start_application(current_user, data.city_name, db)
+    # no file fields at this stage — safe to return directly
+    application = await start_application(current_user, data.city_name, db)
+    return application
 
 
 @router.get(
@@ -69,11 +89,12 @@ async def get_my_application(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active application found",
         )
-    return application
+    return await resolve_application_urls(application)
 
 
 @router.post(
-    "/{application_id}/identity-proof", response_model=RiderApplicationResponseSchema
+    "/{application_id}/identity-proof",
+    response_model=RiderApplicationResponseSchema,
 )
 async def submit_identity_proof(
     application_id: uuid.UUID,
@@ -86,13 +107,15 @@ async def submit_identity_proof(
     application = await get_application_owned_by_user(
         application_id, current_user.id, db
     )
-    return await add_identity_proof(
+    application = await add_identity_proof(
         application, identity_proof_type, identity_proof_number, image, db
     )
+    return await resolve_application_urls(application)
 
 
 @router.post(
-    "/{application_id}/profile-image", response_model=RiderApplicationResponseSchema
+    "/{application_id}/profile-image",
+    response_model=RiderApplicationResponseSchema,
 )
 async def submit_profile_image(
     application_id: uuid.UUID,
@@ -103,11 +126,13 @@ async def submit_profile_image(
     application = await get_application_owned_by_user(
         application_id, current_user.id, db
     )
-    return await add_profile_image(application, image, db)
+    application = await add_profile_image(application, image, db)
+    return await resolve_application_urls(application)
 
 
 @router.post(
-    "/{application_id}/vehicle-details", response_model=RiderApplicationResponseSchema
+    "/{application_id}/vehicle-details",
+    response_model=RiderApplicationResponseSchema,
 )
 async def submit_vehicle_details(
     application_id: uuid.UUID,
@@ -125,7 +150,7 @@ async def submit_vehicle_details(
     application = await get_application_owned_by_user(
         application_id, current_user.id, db
     )
-    return await add_vehicle_details(
+    application = await add_vehicle_details(
         application,
         vehicle_type,
         vehicle_number,
@@ -134,9 +159,13 @@ async def submit_vehicle_details(
         license_image,
         db,
     )
+    return await resolve_application_urls(application)
 
 
-@router.post("/{application_id}/submit", response_model=RiderApplicationResponseSchema)
+@router.post(
+    "/{application_id}/submit",
+    response_model=RiderApplicationResponseSchema,
+)
 async def submit_application_for_review(
     application_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.CUSTOMER))],
@@ -145,13 +174,18 @@ async def submit_application_for_review(
     application = await get_application_owned_by_user(
         application_id, current_user.id, db
     )
-    return await submit_for_review(application, db)
+    application = await submit_for_review(application, db)
+
+    return await resolve_application_urls(application)
 
 
-# Admin-facing routes
+# admin-facing routes
 
 
-@admin_router.get("", response_model=IncomingRiderApplicationsResponseSchema)
+@admin_router.get(
+    "",
+    response_model=IncomingRiderApplicationsResponseSchema,
+)
 async def list_pending_applications(
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -162,12 +196,22 @@ async def list_pending_applications(
         .order_by(RiderApplication.submitted_at.asc())
     )
     applications = result.scalars().all()
+
+    # resolve URLs for each application in the list
+    resolved = []
+    for application in applications:
+        resolved.append(await resolve_application_urls(application))
+
     return IncomingRiderApplicationsResponseSchema(
-        total=len(applications), applications=applications
+        total=len(resolved),
+        applications=resolved,
     )
 
 
-@admin_router.get("/{application_id}", response_model=RiderApplicationAdminDetailSchema)
+@admin_router.get(
+    "/{application_id}",
+    response_model=RiderApplicationAdminDetailSchema,
+)
 async def get_application_detail(
     application_id: uuid.UUID,
     current_user: Annotated[User, Depends(require_roles(UserRole.ADMIN))],
@@ -179,6 +223,7 @@ async def get_application_detail(
 
     storage = get_private_storage()
 
+    # admin gets decrypted PII + presigned URLs for all three documents
     return RiderApplicationAdminDetailSchema(
         **RiderApplicationResponseSchema.model_validate(application).model_dump(),
         identity_proof_number=decrypt_pii(application.identity_proof_number),
@@ -192,7 +237,8 @@ async def get_application_detail(
 
 
 @admin_router.post(
-    "/{application_id}/approve", response_model=RiderApplicationResponseSchema
+    "/{application_id}/approve",
+    response_model=RiderApplicationResponseSchema,
 )
 async def approve_application(
     application_id: uuid.UUID,
@@ -202,11 +248,14 @@ async def approve_application(
     application = await db.get(RiderApplication, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
-    return await approve_rider_application(application, current_user, db)
+
+    application = await approve_rider_application(application, current_user, db)
+    return await resolve_application_urls(application)
 
 
 @admin_router.post(
-    "/{application_id}/reject", response_model=RiderApplicationResponseSchema
+    "/{application_id}/reject",
+    response_model=RiderApplicationResponseSchema,
 )
 async def reject_application(
     application_id: uuid.UUID,
@@ -217,4 +266,8 @@ async def reject_application(
     application = await db.get(RiderApplication, application_id)
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
-    return await reject_rider_application(application, current_user, data.reason, db)
+
+    application = await reject_rider_application(
+        application, current_user, data.reason, db
+    )
+    return await resolve_application_urls(application)

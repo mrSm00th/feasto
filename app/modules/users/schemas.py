@@ -1,8 +1,7 @@
 import uuid
-from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.modules.restaurants.models import RestaurantStatus
 from app.modules.users.models import UserRole, UserStatus
@@ -22,6 +21,16 @@ class UserCreate(BaseSchema):
     email: EmailStr
     phone_number: Annotated[str, Field(min_length=7, max_length=15)]
     password: Annotated[str, Field(min_length=8, max_length=128)]
+
+    @field_validator("email", mode="after")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.lower().strip()
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def strip_full_name(cls, v: str) -> str:
+        return v.strip()
 
 
 class UserPublic(BaseSchema):

@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feasto — Food Delivery Backend API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --black:   #0A0A0A;
+    --surface: #141414;
+    --card:    #1A1A1A;
+    --border:  #2A2A2A;
+    --orange:  #FF4D00;
+    --orange-dim: rgba(255,77,0,0.12);
+    --white:   #F5F5F0;
+    --muted:   #888880;
+    --green:   #28CA42;
+    --blue:    #5AC8FA;
+    --mono:    'JetBrains Mono', monospace;
+    --sans:    'Inter', sans-serif;
+    --display: 'Space Grotesk', sans-serif;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--black); color: var(--white);
+    font-family: var(--sans); font-size: 16px;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px; height: 60px;
+    background: rgba(10,10,10,0.88); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo {
+    font-family: var(--display); font-weight: 700; font-size: 20px;
+    color: var(--orange); text-decoration: none; letter-spacing: -0.02em;
+  }
+  .nav-links { display: flex; align-items: center; gap: 32px; list-style: none; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none;
+    font-size: 14px; font-weight: 500; transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--white); }
+  .nav-cta {
+    background: var(--orange) !important; color: #fff !important;
+    padding: 8px 20px !important; border-radius: 6px !important;
+    font-weight: 600 !important; transition: opacity 0.2s !important;
+  }
+  .nav-cta:hover { opacity: 0.85 !important; }
+
+  /* HERO */
+  .hero {
+    min-height: 100vh; display: flex; flex-direction: column;
+    justify-content: center; align-items: flex-start;
+    padding: 120px 48px 80px; max-width: 1200px; margin: 0 auto;
+  }
+  .hero-eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+  .eyebrow-dot {
+    width: 8px; height: 8px; background: var(--orange);
+    border-radius: 50%; animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:0.4; transform:scale(0.8); }
+  }
+  .eyebrow-text {
+    font-family: var(--mono); font-size: 13px; color: var(--orange);
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .hero h1 {
+    font-family: var(--display); font-size: clamp(48px,7vw,92px);
+    font-weight: 700; line-height: 1.0; letter-spacing: -0.03em;
+    margin-bottom: 24px; max-width: 820px;
+  }
+  .hero h1 em { font-style: normal; color: var(--orange); }
+  .hero-sub {
+    font-size: 18px; color: var(--muted); max-width: 560px;
+    line-height: 1.7; margin-bottom: 48px;
+  }
+  .hero-actions { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 72px; }
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--orange); color: #fff; padding: 14px 28px;
+    border-radius: 8px; font-family: var(--display); font-weight: 600;
+    font-size: 15px; text-decoration: none; transition: opacity 0.2s, transform 0.2s;
+  }
+  .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: transparent; color: var(--white); padding: 14px 28px;
+    border-radius: 8px; border: 1px solid var(--border);
+    font-family: var(--display); font-weight: 600; font-size: 15px;
+    text-decoration: none; transition: border-color 0.2s, transform 0.2s;
+  }
+  .btn-secondary:hover { border-color: var(--white); transform: translateY(-1px); }
+
+  /* TERMINAL */
+  .terminal {
+    width: 100%; max-width: 700px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .terminal-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .tdot { width: 12px; height: 12px; border-radius: 50%; }
+  .td-r { background: #FF5F57; }
+  .td-y { background: #FFBD2E; }
+  .td-g { background: #28CA42; }
+  .terminal-title { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: 8px; }
+  .terminal-body {
+    padding: 20px 24px; height: 196px; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .t-line {
+    font-family: var(--mono); font-size: 13px; line-height: 1.9;
+    display: flex; align-items: baseline; gap: 12px; flex-shrink: 0;
+    opacity: 0; transform: translateY(4px); transition: opacity 0.3s, transform 0.3s;
+  }
+  .t-line.vis { opacity: 1; transform: translateY(0); }
+  .t-method { font-weight: 600; min-width: 52px; font-size: 11px; }
+  .m-get    { color: var(--blue); }
+  .m-post   { color: var(--green); }
+  .m-patch  { color: #FFBD2E; }
+  .m-delete { color: #FF5F57; }
+  .m-put    { color: #BF7AF0; }
+  .t-path { color: var(--white); }
+  .t-desc { color: var(--muted); font-size: 12px; }
+  .cursor {
+    display: inline-block; width: 8px; height: 14px;
+    background: var(--orange); animation: blink 1s infinite; vertical-align: middle;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+  /* STAT BAR */
+  .stat-bar {
+    background: var(--surface);
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    padding: 0 48px;
+  }
+  .stat-bar-inner {
+    max-width: 1200px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(4,1fr);
+  }
+  .stat-item {
+    padding: 32px 40px;
+    border-right: 1px solid var(--border);
+  }
+  .stat-item:first-child { padding-left: 0; }
+  .stat-item:last-child { border-right: none; }
+  .stat-value {
+    font-family: var(--display); font-size: 40px; font-weight: 700;
+    color: var(--white); line-height: 1; margin-bottom: 6px;
+  }
+  .stat-value span { color: var(--orange); }
+  .stat-label { font-size: 13px; color: var(--muted); }
+
+  /* SECTIONS */
+  section { padding: 96px 48px; }
+  .section-inner { max-width: 1200px; margin: 0 auto; }
+  .section-eyebrow {
+    font-family: var(--mono); font-size: 12px; color: var(--orange);
+    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  .section-title {
+    font-family: var(--display); font-size: clamp(28px,4vw,46px);
+    font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; line-height: 1.1;
+  }
+  .section-sub { font-size: 16px; color: var(--muted); max-width: 540px; margin-bottom: 56px; }
+
+  /* ARCH */
+  .arch-grid {
+    display: grid; grid-template-columns: 1fr 44px 1fr 44px 1fr;
+    align-items: center;
+  }
+  .arch-node {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 22px 24px;
+  }
+  .arch-node.hl { border-color: var(--orange); background: var(--orange-dim); }
+  .arch-node-label {
+    font-family: var(--mono); font-size: 11px; color: var(--orange);
+    letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px;
+  }
+  .arch-node-title { font-family: var(--display); font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+  .arch-node-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .arch-arrow { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 22px; }
+  .arch-services { display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; margin-top: 20px; }
+  .arch-tag {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 13px;
+    font-size: 12px; color: var(--muted); font-family: var(--mono);
+  }
+  .arch-tag .d { width: 5px; height: 5px; border-radius: 50%; background: var(--orange); flex-shrink: 0; }
+
+  /* CACHE FLOW */
+  .cache-layout {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start;
+  }
+  .cache-flow-box {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 32px; font-family: var(--mono); font-size: 13px;
+  }
+  .cache-flow-title {
+    font-family: var(--display); font-weight: 600; font-size: 15px;
+    margin-bottom: 24px; color: var(--white);
+  }
+  .flow-step {
+    display: flex; align-items: flex-start; gap: 14px;
+    margin-bottom: 16px; position: relative;
+  }
+  .flow-step:not(:last-child)::after {
+    content: '';
+    position: absolute; left: 14px; top: 32px;
+    width: 1px; height: calc(100% + 4px);
+    background: var(--border);
+  }
+  .flow-icon {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0; z-index: 1;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .flow-icon.hit { background: rgba(40,202,66,0.15); border-color: rgba(40,202,66,0.3); }
+  .flow-icon.miss { background: var(--orange-dim); border-color: rgba(255,77,0,0.3); }
+  .flow-content {}
+  .flow-label { font-size: 13px; color: var(--white); font-weight: 500; }
+  .flow-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .cache-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .metric-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px;
+  }
+  .metric-label {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .metric-value {
+    font-family: var(--display); font-size: 40px; font-weight: 700;
+    color: var(--white); line-height: 1; margin-bottom: 4px;
+  }
+  .metric-value span { font-size: 18px; color: var(--orange); }
+  .metric-sub { font-size: 12px; color: var(--muted); }
+  .metric-card.highlight-card { border-color: var(--orange); background: var(--orange-dim); }
+  .metric-card.highlight-card .metric-value { color: var(--orange); }
+
+  /* DECISIONS */
+  .decisions-grid {
+    display: grid; grid-template-columns: repeat(3,1fr);
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .decision-card { background: var(--card); padding: 32px 28px; transition: background 0.2s; }
+  .decision-card:hover { background: #1F1F1F; }
+  .decision-icon {
+    width: 40px; height: 40px; background: var(--orange-dim);
+    border-radius: 8px; display: flex; align-items: center;
+    justify-content: center; font-size: 18px; margin-bottom: 20px;
+  }
+  .decision-title { font-family: var(--display); font-weight: 600; font-size: 16px; margin-bottom: 8px; }
+  .decision-why {
+    font-family: var(--mono); font-size: 11px; color: var(--orange);
+    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 10px;
+  }
+  .decision-text { font-size: 14px; color: var(--muted); line-height: 1.7; }
+
+  /* MODULES */
+  .modules-list {
+    display: grid; grid-template-columns: repeat(2,1fr);
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .module-item {
+    background: var(--card); padding: 28px 32px;
+    display: flex; gap: 20px; transition: background 0.2s;
+  }
+  .module-item:hover { background: #1F1F1F; }
+  .module-number { font-family: var(--mono); font-size: 12px; color: var(--orange); min-width: 28px; padding-top: 2px; }
+  .module-name { font-family: var(--display); font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+  .module-desc { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+  /* PERF */
+  .perf-grid {
+    display: grid; grid-template-columns: repeat(4,1fr);
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .perf-card { background: var(--card); padding: 28px 24px; }
+  .perf-endpoint { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 16px; line-height: 1.5; }
+  .perf-rps { font-family: var(--display); font-size: 34px; font-weight: 700; color: var(--white); line-height: 1; margin-bottom: 4px; }
+  .perf-rps span { color: var(--orange); font-size: 14px; font-family: var(--mono); }
+  .perf-p50 { font-family: var(--mono); font-size: 13px; color: var(--green); margin-bottom: 8px; }
+  .perf-note { font-size: 12px; color: var(--muted); }
+
+  /* STACK */
+  .stack-grid {
+    display: grid; grid-template-columns: repeat(3,1fr);
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  .stack-row {
+    background: var(--card); padding: 20px 28px;
+    display: flex; align-items: baseline; gap: 16px;
+  }
+  .stack-category {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    letter-spacing: 0.06em; text-transform: uppercase; min-width: 96px;
+  }
+  .stack-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stack-tag {
+    font-size: 12px; color: var(--white); background: var(--surface);
+    border: 1px solid var(--border); padding: 4px 12px;
+    border-radius: 4px; font-family: var(--mono);
+  }
+
+  /* CREDS */
+  .creds-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 40px; }
+  .cred-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px 28px; }
+  .cred-role {
+    font-family: var(--mono); font-size: 11px; color: var(--orange);
+    letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  .cred-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .cred-field:last-child { margin-bottom: 0; }
+  .cred-key { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .cred-value {
+    font-family: var(--mono); font-size: 13px; color: var(--white);
+    background: var(--surface); padding: 9px 12px;
+    border-radius: 6px; border: 1px solid var(--border);
+    cursor: pointer; display: flex; justify-content: space-between;
+    align-items: center; transition: border-color 0.2s; user-select: none;
+  }
+  .cred-value:hover { border-color: var(--orange); }
+  .copy-icon { font-size: 12px; color: var(--muted); transition: color 0.2s; }
+  .cred-value:hover .copy-icon { color: var(--orange); }
+
+  /* CTA */
+  .cta-section {
+    text-align: center; padding: 96px 48px;
+    background: var(--surface); border-top: 1px solid var(--border);
+  }
+  .cta-section h2 {
+    font-family: var(--display); font-size: clamp(32px,5vw,58px);
+    font-weight: 700; letter-spacing: -0.02em; margin-bottom: 20px; line-height: 1.1;
+  }
+  .cta-section p { font-size: 17px; color: var(--muted); margin-bottom: 40px; max-width: 480px; margin-left: auto; margin-right: auto; }
+
+  /* FOOTER */
+  footer { padding: 32px 48px; border-top: 1px solid var(--border); }
+  .footer-inner {
+    max-width: 1200px; margin: 0 auto; width: 100%;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .footer-left { font-family: var(--display); font-weight: 700; font-size: 16px; color: var(--white); }
+  .footer-right { display: flex; gap: 24px; }
+  .footer-right a { color: var(--muted); text-decoration: none; font-size: 14px; transition: color 0.2s; }
+  .footer-right a:hover { color: var(--white); }
+
+  /* TOAST */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 20px;
+    font-family: var(--mono); font-size: 13px; color: var(--white);
+    display: flex; align-items: center; gap: 10px;
+    transform: translateY(80px); opacity: 0;
+    transition: transform 0.3s, opacity 0.3s; z-index: 1000;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast-dot { color: var(--green); }
+
+  /* RESPONSIVE */
+  @media (max-width: 960px) {
+    nav { padding: 0 24px; }
+    .nav-links { display: none; }
+    .hero { padding: 100px 24px 60px; }
+    section { padding: 64px 24px; }
+    .stat-bar { padding: 0 24px; }
+    .stat-bar-inner { grid-template-columns: repeat(2,1fr); }
+    .stat-item { border-right: none; border-bottom: 1px solid var(--border); }
+    .arch-grid { grid-template-columns: 1fr; gap: 12px; }
+    .arch-arrow { transform: rotate(90deg); }
+    .cache-layout { grid-template-columns: 1fr; }
+    .cache-metrics { grid-template-columns: 1fr; }
+    .decisions-grid { grid-template-columns: 1fr; }
+    .modules-list { grid-template-columns: 1fr; }
+    .perf-grid { grid-template-columns: repeat(2,1fr); }
+    .stack-grid { grid-template-columns: 1fr; }
+    .creds-grid { grid-template-columns: 1fr; }
+    footer { padding: 24px; }
+    .footer-inner { flex-direction: column; gap: 16px; text-align: center; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .eyebrow-dot, .cursor { animation: none; opacity: 1; }
+    .t-line, .btn-primary, .btn-secondary { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">Feasto</a>
+  <ul class="nav-links">
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#decisions">Decisions</a></li>
+    <li><a href="#cache">Cache</a></li>
+    <li><a href="#modules">Modules</a></li>
+    <li><a href="#performance">Performance</a></li>
+    <li><a href="#try-it" class="nav-cta">Try the API →</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+<div style="max-width:1200px;margin:0 auto;">
+  <div class="hero">
+    <div class="hero-eyebrow">
+      <div class="eyebrow-dot"></div>
+      <span class="eyebrow-text">Production-grade backend · FastAPI · PostgreSQL · Redis</span>
+    </div>
+    <h1>117 endpoints.<br>15 modules. <em>One backend.</em></h1>
+    <p class="hero-sub">
+      Feasto is a production-focused food delivery backend featuring PostGIS-powered
+      restaurant discovery, Razorpay payments, WebSocket-based order tracking,
+      Redis caching, and asynchronous background processing.
+    </p>
+    <p style="font-size:14px;color:var(--muted);max-width:700px;margin-top:-24px;margin-bottom:48px;">
+      Built as a backend engineering portfolio project focused on system design,
+      scalability, geospatial search, caching, payments, and real-time communication.
+    </p>
+    <div class="hero-actions">
+      <a href="/docs" class="btn-primary">View Live API →</a>
+      <a href="https://github.com/mrSm00th/feasto" target="_blank" class="btn-secondary">GitHub ↗</a>
+    </div>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="tdot td-r"></div>
+        <div class="tdot td-y"></div>
+        <div class="tdot td-g"></div>
+        <span class="terminal-title">feasto · 117 endpoints across 15 modules</span>
+      </div>
+      <div class="terminal-body" id="tbody">
+        <span class="cursor"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- STAT BAR -->
+<div class="stat-bar">
+  <div class="stat-bar-inner">
+    <div class="stat-item">
+      <div class="stat-value">117</div>
+      <div class="stat-label">API endpoints across 15 domain modules</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">28<span>×</span></div>
+      <div class="stat-label">faster response on cache hit (72ms → 2.5ms)</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">0<span>%</span></div>
+      <div class="stat-label">failures during load testing</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value">3<span>ms</span></div>
+      <div class="stat-label">PostGIS geo query on 10k restaurant dataset</div>
+    </div>
+  </div>
+</div>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="section-inner">
+    <div class="section-eyebrow">Architecture</div>
+    <h2 class="section-title">How the system fits together</h2>
+    <p class="section-sub">
+      The system is structured around clear service boundaries, allowing
+      infrastructure components to be replaced with minimal application changes.
+    </p>
+    <div class="arch-grid">
+      <div class="arch-node">
+        <div class="arch-node-label">Client</div>
+        <div class="arch-node-title">Any HTTP client</div>
+        <div class="arch-node-desc">Swagger UI, mobile app, or Postman. Authenticated via JWT Bearer tokens. WebSocket connection for real-time order feed.</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node hl">
+        <div class="arch-node-label">Core</div>
+        <div class="arch-node-title">FastAPI Application</div>
+        <div class="arch-node-desc">Async request handling with role-based auth. 117 endpoints across 15 domain modules.</div>
+        <div class="arch-services">
+          <div class="arch-tag"><div class="d"></div>PostgreSQL / PostGIS</div>
+          <div class="arch-tag"><div class="d"></div>Redis (Upstash)</div>
+          <div class="arch-tag"><div class="d"></div>Celery Beat</div>
+          <div class="arch-tag"><div class="d"></div>Supabase S3</div>
+          <div class="arch-tag"><div class="d"></div>Razorpay</div>
+          <div class="arch-tag"><div class="d"></div>Resend email</div>
+        </div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-node">
+        <div class="arch-node-label">Persistence</div>
+        <div class="arch-node-title">Supabase (Postgres)</div>
+        <div class="arch-node-desc">PostGIS for geo-queries. Trigger-based Geography column sync from lat/lon. Alembic-managed migrations.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DECISIONS -->
+<section id="decisions" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="section-inner">
+    <div class="section-eyebrow">Engineering decisions</div>
+    <h2 class="section-title">Why, not just what</h2>
+    <p class="section-sub">Every non-obvious choice has a reason. These are the ones worth talking about in an interview.</p>
+    <div class="decisions-grid">
+      <div class="decision-card">
+        <div class="decision-icon">📍</div>
+        <div class="decision-why">Why PostGIS over Redis GEO</div>
+        <div class="decision-title">Geo-proximity with PostGIS</div>
+        <div class="decision-text">ST_DWithin on a GIST-indexed Geography column runs in ~3ms on 10k rows. Redis GEO lacks JOIN support — you can't filter by cuisine, status, or closure in the same query without multiple round trips.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">📒</div>
+        <div class="decision-why">Why append-only</div>
+        <div class="decision-title">Immutable earnings ledger</div>
+        <div class="decision-text">Earnings records are never updated or deleted — only appended. Audit trail is always complete, payout reconciliation is always correct, no race conditions on financial writes.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">🔒</div>
+        <div class="decision-why">Why SELECT FOR UPDATE</div>
+        <div class="decision-title">Race condition prevention</div>
+        <div class="decision-text">Cart checkout and rider order acceptance use SELECT FOR UPDATE to prevent two users from claiming the same resource simultaneously. Correctness guaranteed at the DB level, not the application layer.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">🔄</div>
+        <div class="decision-why">Why triggers over app-layer</div>
+        <div class="decision-title">PostGIS location sync</div>
+        <div class="decision-text">DB triggers sync the Geography column from lat/lon on every write. The app never touches the Geography column directly — no risk of forgetting the sync in a new route or migration.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">⭐</div>
+        <div class="decision-why">Why one table</div>
+        <div class="decision-title">Polymorphic review model</div>
+        <div class="decision-text">A single Review table handles restaurant and rider reviews via nullable foreign keys. No join table, no type enum gymnastics. Queries stay simple, aggregations stay fast.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">🔐</div>
+        <div class="decision-why">Why two buckets</div>
+        <div class="decision-title">Split S3 storage</div>
+        <div class="decision-text">Public bucket for restaurant and menu images — served at static CDN URLs. Private bucket for KYC documents and rider identity proofs — only accessible via short-lived presigned URLs generated server-side.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CACHE -->
+<section id="cache">
+  <div class="section-inner">
+    <div class="section-eyebrow">Redis caching</div>
+    <h2 class="section-title">28× faster. Measured.</h2>
+    <p class="section-sub">Cache-aside pattern on high-read endpoints. Soft failure — a Redis outage degrades performance but never takes the app down.</p>
+    <div class="cache-layout">
+      <div>
+        <div class="cache-flow-box">
+          <div class="cache-flow-title">Request lifecycle</div>
+          <div class="flow-step">
+            <div class="flow-icon">→</div>
+            <div class="flow-content">
+              <div class="flow-label">Incoming request</div>
+              <div class="flow-time">GET /api/restaurants/{id}</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-icon">🔍</div>
+            <div class="flow-content">
+              <div class="flow-label">Check Redis</div>
+              <div class="flow-time">key: restaurant:detail:{uuid}</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-icon hit">⚡</div>
+            <div class="flow-content">
+              <div class="flow-label" style="color:var(--green);">Cache hit → return</div>
+              <div class="flow-time">~2.5ms total · Redis lookup only</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-icon miss">🗄️</div>
+            <div class="flow-content">
+              <div class="flow-label" style="color:var(--orange);">Cache miss → query DB</div>
+              <div class="flow-time">~25-30ms DB + 1ms serialize + ~44ms Redis write</div>
+            </div>
+          </div>
+          <div class="flow-step">
+            <div class="flow-icon">✓</div>
+            <div class="flow-content">
+              <div class="flow-label">Store in Redis · return</div>
+              <div class="flow-time">TTL: 60 seconds · invalidated on update</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;padding:16px 20px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--muted);">
+          <strong style="color:var(--white);">What's cached:</strong> restaurant detail, discovery feed, cuisine list.<br>
+          <strong style="color:var(--white);">Never cached:</strong> orders, cart, payments — real-time data only.
+        </div>
+      </div>
+      <div class="cache-metrics">
+        <div class="metric-card">
+          <div class="metric-label">Cache miss (DB path)</div>
+          <div class="metric-value">72 <span>ms</span></div>
+          <div class="metric-sub">DB ~28ms · serialize ~1ms · Redis write ~44ms</div>
+        </div>
+        <div class="metric-card highlight-card">
+          <div class="metric-label">Cache hit (Redis path)</div>
+          <div class="metric-value">2.5 <span>ms</span></div>
+          <div class="metric-sub">Redis lookup only · zero DB queries</div>
+        </div>
+        <div class="metric-card highlight-card">
+          <div class="metric-label">Speedup</div>
+          <div class="metric-value">28.8 <span>×</span></div>
+          <div class="metric-sub">72ms → 2.5ms on repeated requests</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Cache TTL</div>
+          <div class="metric-value">60 <span>s</span></div>
+          <div class="metric-sub">Invalidated immediately on restaurant update or pause</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MODULES -->
+<section id="modules" style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="section-inner">
+    <div class="section-eyebrow">Modules</div>
+    <h2 class="section-title">Core platform modules</h2>
+    <p class="section-sub">15 domain modules, 117 endpoints, grouped into 8 core areas — each with its own models, routes, schemas, and services.</p>
+    <div class="modules-list">
+      <div class="module-item">
+        <div class="module-number">01</div>
+        <div class="module-content">
+          <div class="module-name">Auth & Users</div>
+          <div class="module-desc">JWT access tokens, refresh token rotation, email OTP verification, password reset via secure emailed link. Role-based access: Customer, Owner, Rider, Admin. Case-insensitive email deduplication.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">02</div>
+        <div class="module-content">
+          <div class="module-name">Restaurants</div>
+          <div class="module-desc">Full onboarding state machine (DRAFT → ACTIVE), manual pause/resume, planned closures, PostGIS location intake, multi-shift weekly availability schedules, cuisine tagging with admin review workflow.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">03</div>
+        <div class="module-content">
+          <div class="module-name">Menus</div>
+          <div class="module-desc">Category and item CRUD with archive-before-delete enforcement. Drag-and-drop reordering, availability toggles, image upload via Pillow processing pipeline with automatic JPEG conversion and thumbnail generation.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">04</div>
+        <div class="module-content">
+          <div class="module-name">Orders & Cart</div>
+          <div class="module-desc">Full order lifecycle state machine (AWAITING_PAYMENT → DELIVERED). Cart with per-item quantity management. SELECT FOR UPDATE on checkout to prevent overselling under concurrent load.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">05</div>
+        <div class="module-content">
+          <div class="module-name">Payments</div>
+          <div class="module-desc">Razorpay Orders API integration, webhook signature verification, COD support, automatic refunds on cancellation. Payment status tracked independently from order status. Signature-verified webhooks.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">06</div>
+        <div class="module-content">
+          <div class="module-name">Riders & Dispatch</div>
+          <div class="module-desc">Rider onboarding with PII encryption and private S3 KYC storage. PostGIS-based geo-dispatch to nearby riders. Real-time location updates every 3-5 seconds, assignment timeout via Celery Beat.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">07</div>
+        <div class="module-content">
+          <div class="module-name">Discovery</div>
+          <div class="module-desc">Geo-proximity restaurant feed using ST_DWithin with cursor pagination. Cuisine filtering, city-based fallback. Cached at Redis with 30s TTL, invalidated on restaurant state change or pause.</div>
+        </div>
+      </div>
+      <div class="module-item">
+        <div class="module-number">08</div>
+        <div class="module-content">
+          <div class="module-name">Earnings & Payouts</div>
+          <div class="module-desc">Immutable append-only earnings ledger per order. Weekly payout batching via Celery Beat. Commission rate configurable per restaurant. Separate rider and restaurant payout flows with full audit trail.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PERFORMANCE -->
+<section id="performance">
+  <div class="section-inner">
+    <div class="section-eyebrow">Performance</div>
+    <h2 class="section-title">Load testing results</h2>
+    <p class="section-sub">Load tested with Locust — 100 concurrent users, 60s sustained, zero failures across 1,150 requests.</p>
+    <div class="perf-grid">
+      <div class="perf-card">
+        <div class="perf-endpoint">GET /restaurants/{id}</div>
+        <div class="perf-rps">6.3 <span>RPS</span></div>
+        <div class="perf-p50">p50 · 32ms</div>
+        <div class="perf-note">Redis cache hit · 0% failures</div>
+      </div>
+      <div class="perf-card">
+        <div class="perf-endpoint">GET /restaurants/</div>
+        <div class="perf-rps">3.7 <span>RPS</span></div>
+        <div class="perf-p50">p50 · 35ms</div>
+        <div class="perf-note">Geo-discovery feed · 0% failures</div>
+      </div>
+      <div class="perf-card">
+        <div class="perf-endpoint">GET /orders</div>
+        <div class="perf-rps">6.9 <span>RPS</span></div>
+        <div class="perf-p50">p50 · 37ms</div>
+        <div class="perf-note">Authenticated · 0% failures</div>
+      </div>
+      <div class="perf-card">
+        <div class="perf-endpoint">GET /menu-categories</div>
+        <div class="perf-rps">1.7 <span>RPS</span></div>
+        <div class="perf-p50">p50 · 28ms</div>
+        <div class="perf-note">Public endpoint · 0% failures</div>
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--muted);">
+      Benchmarked locally on shared hardware — PostgreSQL, Redis, and FastAPI on the same machine. Production numbers on separate infrastructure will be significantly better on all metrics.
+    </div>
+  </div>
+</section>
+
+<!-- CHALLENGES -->
+<section id="challenges">
+  <div class="section-inner">
+    <div class="section-eyebrow">Lessons learned</div>
+    <h2 class="section-title">Challenges solved during development</h2>
+    <p class="section-sub">Several design choices emerged from real implementation and operational problems hit while building the platform — not just textbook patterns applied up front.</p>
+    <div class="decisions-grid">
+      <div class="decision-card">
+        <div class="decision-icon">🔁</div>
+        <div class="decision-why">Why idempotency keys</div>
+        <div class="decision-title">Duplicate payment webhooks</div>
+        <div class="decision-text">Razorpay retries webhooks on slow responses or transient errors, which risked double-crediting an order. Each webhook event is checked against a processed-events table before the payment status is updated, so retries are safely ignored.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">🖼️</div>
+        <div class="decision-why">Why a two-phase upload</div>
+        <div class="decision-title">Image pipeline reliability</div>
+        <div class="decision-text">An early version wrote the DB record before the S3 upload finished, so a failed upload left a menu item pointing at a missing image. Upload now completes and is verified first; the DB row is only written once the file exists in storage.</div>
+      </div>
+      <div class="decision-card">
+        <div class="decision-icon">⏱️</div>
+        <div class="decision-why">Why a fallback dispatch tier</div>
+        <div class="decision-title">No rider accepts in time</div>
+        <div class="decision-text">Geo-dispatch initially had no timeout, so an order could sit unassigned if the nearest riders were busy. A Celery Beat task now widens the search radius and re-broadcasts after 30 seconds, falling back further if still unclaimed.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STACK -->
+<section style="background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="section-inner">
+    <div class="section-eyebrow">Stack</div>
+    <h2 class="section-title">What it's built with</h2>
+    <p class="section-sub">
+      Technologies selected to support scalability, maintainability, and operational simplicity.
+    </p>
+    <div class="stack-grid">
+      <div class="stack-row">
+        <div class="stack-category">Language</div>
+        <div class="stack-items"><span class="stack-tag">Python 3.12</span></div>
+      </div>
+      <div class="stack-row">
+        <div class="stack-category">Backend</div>
+        <div class="stack-items">
+          <span class="stack-tag">FastAPI</span>
+          <span class="stack-tag">SQLAlchemy async</span>
+          <span class="stack-tag">Alembic</span>
+          <span class="stack-tag">Celery Beat</span>
+          <span class="stack-tag">Pydantic v2</span>
+        </div>
+      </div>
+      <div class="stack-row">
+        <div class="stack-category">Database</div>
+        <div class="stack-items">
+          <span class="stack-tag">PostgreSQL</span>
+          <span class="stack-tag">PostGIS</span>
+          <span class="stack-tag">GeoAlchemy2</span>
+          <span class="stack-tag">Supabase</span>
+        </div>
+      </div>
+      <div class="stack-row">
+        <div class="stack-category">Cache</div>
+        <div class="stack-items">
+          <span class="stack-tag">Redis</span>
+          <span class="stack-tag">Upstash</span>
+          <span class="stack-tag">cache-aside</span>
+        </div>
+      </div>
+      <div class="stack-row">
+        <div class="stack-category">Storage</div>
+        <div class="stack-items">
+          <span class="stack-tag">Supabase S3</span>
+          <span class="stack-tag">boto3</span>
+          <span class="stack-tag">Pillow</span>
+        </div>
+      </div>
+      <div class="stack-row">
+        <div class="stack-category">Services</div>
+        <div class="stack-items">
+          <span class="stack-tag">Razorpay</span>
+          <span class="stack-tag">Resend</span>
+          <span class="stack-tag">WebSockets</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TRY IT -->
+<section id="try-it">
+  <div class="section-inner">
+    <div class="section-eyebrow">Try it</div>
+    <h2 class="section-title">Live demo credentials</h2>
+    <p class="section-sub">Three roles to explore. Click any value to copy it to clipboard.</p>
+    <div class="creds-grid">
+      <div class="cred-card">
+        <div class="cred-role">Customer</div>
+        <div class="cred-field">
+          <div class="cred-key">Email</div>
+          <div class="cred-value" onclick="copyText('customer@feasto.dev',this)">customer@feasto.dev <span class="copy-icon">⎘</span></div>
+        </div>
+        <div class="cred-field">
+          <div class="cred-key">Password</div>
+          <div class="cred-value" onclick="copyText('demo1234',this)">demo1234 <span class="copy-icon">⎘</span></div>
+        </div>
+      </div>
+      <div class="cred-card">
+        <div class="cred-role">Restaurant Owner</div>
+        <div class="cred-field">
+          <div class="cred-key">Email</div>
+          <div class="cred-value" onclick="copyText('owner@feasto.dev',this)">owner@feasto.dev <span class="copy-icon">⎘</span></div>
+        </div>
+        <div class="cred-field">
+          <div class="cred-key">Password</div>
+          <div class="cred-value" onclick="copyText('demo1234',this)">demo1234 <span class="copy-icon">⎘</span></div>
+        </div>
+      </div>
+      <div class="cred-card">
+        <div class="cred-role">Rider</div>
+        <div class="cred-field">
+          <div class="cred-key">Email</div>
+          <div class="cred-value" onclick="copyText('rider@feasto.dev',this)">rider@feasto.dev <span class="copy-icon">⎘</span></div>
+        </div>
+        <div class="cred-field">
+          <div class="cred-key">Password</div>
+          <div class="cred-value" onclick="copyText('demo1234',this)">demo1234 <span class="copy-icon">⎘</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:28px;padding:20px 24px;background:var(--card);border:1px solid var(--border);border-radius:10px;font-size:14px;color:var(--muted);line-height:1.8;">
+      <strong style="color:var(--white);">How to authenticate in Swagger:</strong>
+      Hit <code style="font-family:var(--mono);color:var(--orange);font-size:13px;">POST /api/users/token</code> with the credentials above →
+      copy the <code style="font-family:var(--mono);color:var(--orange);font-size:13px;">access_token</code> from the response →
+      click <strong style="color:var(--white);">Authorize</strong> at the top of the docs page →
+      paste as <code style="font-family:var(--mono);color:var(--orange);font-size:13px;">Bearer {token}</code>.
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section">
+  <h2>
+  Production patterns.<br>
+  <em style="color:var(--orange);">Open source implementation.</em>
+  </h2>
+  <p>
+  Explore the architecture, review implementation details, and inspect the engineering decisions behind the platform.
+  </p>
+  <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;">
+    <a href="/docs" class="btn-primary">View Live API →</a>
+    <a href="https://github.com/mrSm00th/feasto" target="_blank" class="btn-secondary">GitHub ↗</a>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-left"><span style="color:var(--orange);">Feasto</span> — Backend engineering portfolio project by Aditya Yadav</div>
+    <div class="footer-right">
+      <a href="https://github.com/mrSm00th" target="_blank">GitHub</a>
+      <a href="https://linkedin.com/in/mrSm00th" target="_blank">LinkedIn</a>
+      <a href="/docs">API Docs</a>
+    </div>
+  </div>
+</footer>
+
+<div class="toast" id="toast">
+  <span class="toast-dot">✓</span>
+  <span id="toast-text">Copied</span>
+</div>
+
+<script>
+  const routes = [
+    { m:'GET',    c:'m-get',    p:'/api/restaurants/',                      d:'→ geo-proximity discovery feed' },
+    { m:'POST',   c:'m-post',   p:'/api/users/token',                       d:'→ JWT authentication' },
+    { m:'GET',    c:'m-get',    p:'/api/restaurants/{id}',                  d:'→ cached restaurant detail' },
+    { m:'POST',   c:'m-post',   p:'/api/orders/',                           d:'→ place order with payment' },
+    { m:'PATCH',  c:'m-patch',  p:'/api/restaurant/orders/{id}/accept',     d:'→ restaurant confirms order' },
+    { m:'POST',   c:'m-post',   p:'/api/rider/orders/{id}/accept',          d:'→ rider claims delivery' },
+    { m:'PATCH',  c:'m-patch',  p:'/api/rider/location',                    d:'→ update rider location' },
+    { m:'GET',    c:'m-get',    p:'/api/rider/{id}/rider-location',         d:'→ live order tracking' },
+    { m:'POST',   c:'m-post',   p:'/api/users/verify-email/send',           d:'→ send OTP verification' },
+    { m:'POST',   c:'m-post',   p:'/api/users/password-reset/request',      d:'→ send reset link' },
+    { m:'PATCH',  c:'m-patch',  p:'/api/restaurants/{id}/pause',            d:'→ pause order intake' },
+    { m:'GET',    c:'m-get',    p:'/api/restaurants/{id}/menu-categories',  d:'→ browse menu' },
+    { m:'PUT',    c:'m-put',    p:'/api/restaurants/{id}/menu-categories/{category_id}/items/{item_id}/image', d:'→ upload menu item image' },
+    { m:'DELETE', c:'m-delete', p:'/api/restaurants/{id}/closure',          d:'→ cancel planned closure' },
+  ];
+
+  const tbody = document.getElementById('tbody');
+  const cursor = tbody.querySelector('.cursor');
+  const VISIBLE_LINES = 6;
+  let idx = 0;
+
+  function buildLine(r) {
+    const line = document.createElement('div');
+    line.className = 't-line';
+    line.innerHTML = `<span class="t-method ${r.c}">${r.m}</span><span class="t-path">${r.p}</span><span class="t-desc">${r.d}</span>`;
+    return line;
+  }
+
+  // Fill the box immediately so it never appears empty or "gappy" on load.
+  // These render already-visible — no fade-in, no wait.
+  for (let i = 0; i < VISIBLE_LINES; i++) {
+    const line = buildLine(routes[idx % routes.length]);
+    line.classList.add('vis');
+    tbody.insertBefore(line, cursor);
+    idx++;
+  }
+
+  function addLine() {
+    const r = routes[idx % routes.length];
+    const line = buildLine(r);
+    tbody.insertBefore(line, cursor);
+    idx++;
+
+    // Remove the oldest line immediately so the box always holds the
+    // same number of lines — no overlap, no height jump.
+    const lines = tbody.querySelectorAll('.t-line');
+    if (lines.length > VISIBLE_LINES) {
+      lines[0].remove();
+    }
+
+    requestAnimationFrame(() => requestAnimationFrame(() => line.classList.add('vis')));
+    setTimeout(addLine, 1100);
+  }
+  setTimeout(addLine, 1100);
+
+  function copyText(text, el) {
+    navigator.clipboard.writeText(text).then(() => {
+      const icon = el.querySelector('.copy-icon');
+      icon.textContent = '✓'; icon.style.color = 'var(--green)';
+      showToast('Copied: ' + text);
+      setTimeout(() => { icon.textContent = '⎘'; icon.style.color = ''; }, 1500);
+    });
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    document.getElementById('toast-text').textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.style.opacity = '1';
+        e.target.style.transform = 'translateY(0)';
+      }
+    });
+  }, { threshold: 0.08 });
+
+  document.querySelectorAll('.decision-card,.module-item,.stack-row,.perf-card,.metric-card,.flow-step').forEach(el => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(16px)';
+    el.style.transition = 'opacity 0.45s, transform 0.45s';
+    obs.observe(el);
+  });
+</script>
+</body>
+</html>

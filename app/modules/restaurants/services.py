@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from geoalchemy2 import Geography
@@ -105,9 +106,12 @@ async def discover_restaurants_service(
     limit: int = 20,
 ) -> tuple[list[Restaurant], str | None, bool]:
 
-    now = datetime.now(UTC)
-    current_time = now.astimezone(UTC).timetz()
-    today_dow = now.isoweekday() - 1
+    IST = ZoneInfo("Asia/Kolkata")
+
+    now = datetime.now(IST)
+
+    current_time = now.time()
+    today_dow = now.weekday()
 
     active_closure_subquery = (
         select(RestaurantClosure.restaurant_id)

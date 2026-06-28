@@ -17,12 +17,11 @@ def require_roles(*allowed_roles: UserRole):
                 detail="You do not have permission to access this resource",
             )
 
-        # NOTE: enable it after completing the verification route
-        # if not current_user.is_verified:
-        #     raise HTTPException(
-        #         status_code=status.HTTP_403_FORBIDDEN,
-        #         detail="You must verify your email address to access this resource",
-        #     )
+        if not current_user.is_account_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You must verify your email address to access this resource",
+            )
 
         return current_user
 

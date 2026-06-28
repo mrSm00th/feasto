@@ -171,17 +171,6 @@ class MenuItemSchema(BaseSchema):
     sort_order: Annotated[int, Field(ge=1, le=100)]
 
 
-class MenuItemPaginatedResponse(BaseSchema):
-
-    menu_items: list[MenuItemSchema]
-    category_id: uuid.UUID
-    restaurant_id: uuid.UUID
-    total: int
-    skip: int
-    limit: int
-    has_more: bool
-
-
 class MenuCategoryUpdateRequest(BaseSchema):
 
     name: Annotated[str | None, Field(min_length=1, max_length=100)] = None
