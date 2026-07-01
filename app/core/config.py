@@ -79,11 +79,14 @@ class Settings(BaseSettings):
     CACHE_TTL_DISCOVERY_FEED: int = 30
 
     # email
-    resend_api_key: str = ""
-    mail_from: str = "onboarding@resend.dev"
-    mail_from_name: str = "KartFlow"
 
-    # used in password reset email link
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str
+    smtp_password: str
+    mail_from_name: str = "Feasto"
+    mail_from: str
+
     frontend_url: str = "http://localhost:3000"
 
     # otp
