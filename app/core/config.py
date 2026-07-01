@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     )
 
     database_url: str
-    # database_url_direct: str
 
     secret_key: SecretStr
     algorithm: str = "HS256"
@@ -80,12 +79,13 @@ class Settings(BaseSettings):
 
     # email
 
-    smtp_host: str = "smtp.gmail.com"
+    smtp_host: str = "smtp-relay.brevo.com"
     smtp_port: int = 587
     smtp_user: str
     smtp_password: str
-    mail_from_name: str = "Feasto"
+    mail_from_name: str
     mail_from: str
+    mail_use_tls: bool = True
 
     frontend_url: str = "http://localhost:3000"
 
